@@ -5137,7 +5137,32 @@
       }
 
       function copyText(t) {
-        navigator.clipboard.writeText(t).then(() => toast("已复制", "ok"));
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(t).then(
+            () => toast("已复制", "ok"),
+            () => fallbackCopy(t),
+          );
+        } else {
+          fallbackCopy(t);
+        }
+      }
+
+      function fallbackCopy(t) {
+        try {
+          const ta = document.createElement("textarea");
+          ta.value = t;
+          ta.style.position = "fixed";
+          ta.style.opacity = "0";
+          ta.style.left = "-9999px";
+          document.body.appendChild(ta);
+          ta.select();
+          ta.setSelectionRange(0, ta.value.length);
+          document.execCommand("copy");
+          ta.remove();
+          toast("已复制", "ok");
+        } catch {
+          toast("复制失败，请手动复制", "err");
+        }
       }
 
       function downloadJson(filename, data) {
