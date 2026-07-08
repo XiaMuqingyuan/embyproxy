@@ -1,5 +1,7 @@
 # EmbyProxy
 
+# 自用 
+
 EmbyProxy 是一个用于管理和转发 Emby 节点请求的代理程序，提供 Web 管理界面、节点配置、转发规则和运行状态管理。
 
 ![EmbyProxy 管理界面](https://img.072899.xyz/2026/05/29e593c5516b76d3e8532bb5c1da7bd0.png)
