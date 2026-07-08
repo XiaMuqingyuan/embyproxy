@@ -26,9 +26,19 @@ jobs:
             goarch: arm64
             extension: .exe
             archive: zip
+          - name: windows-amd64
+            goos: windows
+            goarch: amd64
+            extension: .exe
+            archive: zip
           - name: linux-arm64
             goos: linux
             goarch: arm64
+            extension: ""
+            archive: tar.gz
+          - name: linux-amd64
+            goos: linux
+            goarch: amd64
             extension: ""
             archive: tar.gz
           - name: linux-armv7
@@ -56,8 +66,9 @@ jobs:
           CGO_ENABLED: "0"
         run: |
           mkdir -p dist
-          binary="${APP_NAME}-${{ matrix.name }}${{ matrix.extension }}"
-          version="${GITHUB_REF_NAME:-dev}"
+          DATE="$(TZ=Asia/Shanghai date +'%Y%m%d')"
+          binary="${APP_NAME}-${DATE}-${{ matrix.name }}${{ matrix.extension }}"
+          version="${DATE}"
           commit="${GITHUB_SHA::7}"
           built_at="$(TZ=Asia/Shanghai date +'%Y-%m-%dT%H:%M:%S%:z')"
           ldflags="-s -w"
@@ -68,9 +79,9 @@ jobs:
           cp .env.example dist/.env.example
 
           if [ "${{ matrix.archive }}" = "zip" ]; then
-            (cd dist && zip "${APP_NAME}-${{ matrix.name }}.zip" "${binary}" .env.example)
+            (cd dist && zip "${APP_NAME}-${DATE}-${{ matrix.name }}.zip" "${binary}" .env.example)
           else
-            (cd dist && tar -czf "${APP_NAME}-${{ matrix.name }}.tar.gz" "${binary}" .env.example)
+            (cd dist && tar -czf "${APP_NAME}-${DATE}-${{ matrix.name }}.tar.gz" "${binary}" .env.example)
           fi
 
       - name: Upload artifact
@@ -151,7 +162,8 @@ jobs:
         id: build_meta
         shell: bash
         run: |
-          echo "version=${GITHUB_REF_NAME:-dev}" >> "$GITHUB_OUTPUT"
+          DATE="$(TZ=Asia/Shanghai date +'%Y%m%d')"
+          echo "version=${DATE}" >> "$GITHUB_OUTPUT"
           echo "commit=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
           echo "built_at=$(TZ=Asia/Shanghai date +'%Y-%m-%dT%H:%M:%S%:z')" >> "$GITHUB_OUTPUT"
 
