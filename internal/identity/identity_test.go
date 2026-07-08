@@ -145,10 +145,10 @@ func TestApplyToHeadersMovesAuthorizationToken(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			manager := NewManager(nil)
-			snap := manager.Snapshot(DefaultProfile)
+			snap := manager.Snapshot(DefaultProfile, "")
 			wantAuth := "Emby Client=" + snap.ClientName + ",Device=" + snap.DeviceName + ",DeviceId=" + snap.DeviceID + ",Version=" + snap.ClientVersion
 
-			manager.ApplyToHeaders(tt.headers, DefaultProfile)
+			manager.ApplyToHeaders(tt.headers, DefaultProfile, "")
 
 			if got := tt.headers.Get("X-Emby-Token"); got != tt.wantToken {
 				t.Fatalf("X-Emby-Token = %q, want %q", got, tt.wantToken)
@@ -185,7 +185,7 @@ func TestApplyToHeadersRewritesEmbyAuthorization(t *testing.T) {
 	headers.Set("X-MediaBrowser-Device-Id", "original-device")
 	headers.Set("X-MediaBrowser-Device-Name", "Original Device")
 
-	manager.ApplyToHeaders(headers, "yamby")
+	manager.ApplyToHeaders(headers, "yamby", "")
 
 	for _, key := range []string{"Authorization", "X-Emby-Authorization"} {
 		value := headers.Get(key)
@@ -213,7 +213,7 @@ func TestApplyToHeadersDoesNotAddMissingEmbyHeaders(t *testing.T) {
 	manager := NewManager(nil)
 	headers := http.Header{}
 
-	manager.ApplyToHeaders(headers, "yamby")
+	manager.ApplyToHeaders(headers, "yamby", "")
 
 	for _, key := range []string{"Authorization", "X-Application", "X-Emby-Authorization", "X-Emby-Client", "X-Emby-Client-Version", "X-Emby-Device-Name", "X-Emby-Device-Id"} {
 		if got := headers.Get(key); got != "" {
@@ -228,7 +228,7 @@ func TestApplyToHeadersKeepsIdentityHeadersForHillsWindows(t *testing.T) {
 	headers.Set("X-Emby-Client", "Original")
 	headers.Set("X-Emby-Device-Id", "original-device")
 
-	manager.ApplyToHeaders(headers, "hills_windows")
+	manager.ApplyToHeaders(headers, "hills_windows", "")
 
 	if got := headers.Get("X-Emby-Client"); got != "Hills Windows" {
 		t.Fatalf("X-Emby-Client = %q, want rewritten identity (not dropped)", got)
@@ -255,7 +255,7 @@ func TestApplyToURLMigratesYambyAllowedQueryAuth(t *testing.T) {
 			headers := http.Header{}
 			u := parseIdentityURL(t, tt.queryKey+"=query-value&tag=v1")
 
-			manager.ApplyToURL(u, headers, "yamby")
+			manager.ApplyToURL(u, headers, "yamby", "")
 
 			query := u.Query()
 			if headers.Get(tt.header) != "query-value" {
@@ -276,7 +276,7 @@ func TestApplyToURLUsesFirstYambyQueryAuthValue(t *testing.T) {
 	headers := http.Header{}
 	u := parseIdentityURL(t, "x-emby-token=first-value&x-emby-token=second-value")
 
-	manager.ApplyToURL(u, headers, "yamby")
+	manager.ApplyToURL(u, headers, "yamby", "")
 
 	if headers.Get("X-Emby-Token") != "first-value" {
 		t.Fatal("X-Emby-Token header behavior did not match expectation")
@@ -291,7 +291,7 @@ func TestApplyToURLKeepsExistingYambyHeader(t *testing.T) {
 	headers := http.Header{"X-Emby-Token": {"header-value"}}
 	u := parseIdentityURL(t, "x-emby-token=query-value")
 
-	manager.ApplyToURL(u, headers, "yamby")
+	manager.ApplyToURL(u, headers, "yamby", "")
 
 	if headers.Get("X-Emby-Token") != "header-value" {
 		t.Fatal("existing X-Emby-Token header was overwritten")
@@ -306,7 +306,7 @@ func TestApplyToURLFillsEmptyExistingYambyHeader(t *testing.T) {
 	headers := http.Header{"X-Emby-Token": {""}}
 	u := parseIdentityURL(t, "x-emby-token=query-value")
 
-	manager.ApplyToURL(u, headers, "yamby")
+	manager.ApplyToURL(u, headers, "yamby", "")
 
 	if headers.Get("X-Emby-Token") != "query-value" {
 		t.Fatal("empty X-Emby-Token header was not filled from query")
@@ -342,7 +342,7 @@ func TestApplyToURLMovesQueryAuthorizationToken(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			u := parseIdentityURL(t, tt.rawQuery)
 
-			manager.ApplyToURL(u, tt.headers, tt.profile)
+			manager.ApplyToURL(u, tt.headers, tt.profile, "")
 
 			if got := tt.headers.Get("X-Emby-Token"); got != tt.wantToken {
 				t.Fatalf("X-Emby-Token = %q, want %q", got, tt.wantToken)
@@ -368,7 +368,7 @@ func TestApplyToURLStripsOtherYambyIdentityQueryAndKeepsOrdinaryQuery(t *testing
 	headers := http.Header{}
 	u := parseIdentityURL(t, "x-emby-client=Client&x-emby-device-id=device&x-mediabrowser-client=MediaBrowser&x-mediabrowser-device-id=media-device&X_MediaBrowser_Client_Version=1.2.3&DeviceId=source-device&DeviceName=source-name&quality=90&tag=v1&fields=Overview&maxwidth=600&api_key=api-value&playsessionid=session-value")
 
-	manager.ApplyToURL(u, headers, "yamby")
+	manager.ApplyToURL(u, headers, "yamby", "")
 
 	query := u.Query()
 	for _, key := range []string{"x-emby-client", "x-emby-device-id", "x-mediabrowser-client", "x-mediabrowser-device-id", "X_MediaBrowser_Client_Version", "DeviceId", "DeviceName"} {
@@ -403,7 +403,7 @@ func TestApplyToURLStripsControlBytesFromPromotedHeaderValues(t *testing.T) {
 		// Authorization value decoded contains CR/LF and a NUL byte.
 		u := parseIdentityURL(t, "Authorization="+url.QueryEscape("Emby\r\nX-Injected: 1\r\nClient=Yamby\x00"))
 
-		manager.ApplyToURL(u, headers, "yamby")
+		manager.ApplyToURL(u, headers, "yamby", "")
 
 		got := headers.Get("Authorization")
 		if strings.ContainsAny(got, "\r\n\x00") {
@@ -420,7 +420,7 @@ func TestApplyToURLStripsControlBytesFromPromotedHeaderValues(t *testing.T) {
 		auth := `Emby Token="evil` + "\r\n" + `tail"`
 		u := parseIdentityURL(t, "X-Emby-Authorization="+url.QueryEscape(auth))
 
-		manager.ApplyToURL(u, headers, "yamby")
+		manager.ApplyToURL(u, headers, "yamby", "")
 
 		got := headers.Get("X-Emby-Token")
 		if strings.ContainsAny(got, "\r\n") {
@@ -436,7 +436,7 @@ func TestApplyToURLStripsControlBytesFromPromotedHeaderValues(t *testing.T) {
 		auth := `Emby Token="evil` + "\r\n" + `tail"`
 		u := parseIdentityURL(t, "X-Emby-Authorization="+url.QueryEscape(auth))
 
-		manager.ApplyToURL(u, headers, "hills_windows")
+		manager.ApplyToURL(u, headers, "hills_windows", "")
 
 		got := headers.Get("X-Emby-Token")
 		if strings.ContainsAny(got, "\r\n") {
@@ -450,13 +450,13 @@ func TestApplyToURLStripsControlBytesFromPromotedHeaderValues(t *testing.T) {
 
 func TestApplyToURLKeepsHillsQueryIdentityBehavior(t *testing.T) {
 	manager := NewManager(nil)
-	hillsWindows := manager.Snapshot("hills_windows")
+	hillsWindows := manager.Snapshot("hills_windows", "")
 	u, err := url.Parse(`https://example.test/emby/Users/1?X-Emby-Authorization=Emby+Client%3D%22Synthetic+Client%22%2C+Device%3D%22SYNTHETIC-PC%22%2C+DeviceId%3D%22synthetic-source-device-id%22%2C+Version%3D%221.2.0%22&X-Emby-Client=Synthetic+Client&X-Emby-Device-Name=SYNTHETIC-PC&X-Emby-Device-Id=synthetic-source-device-id&tag=v1`)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	manager.ApplyToURL(u, http.Header{}, "hills_windows")
+	manager.ApplyToURL(u, http.Header{}, "hills_windows", "")
 
 	got := u.RawQuery
 	for _, want := range []string{"X-Emby-Authorization=", "Client%3D%22Hills+Windows%22", "X-Emby-Client=Hills+Windows"} {
@@ -522,7 +522,7 @@ func TestProfileDeviceIdentityDefaults(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			snap := manager.Snapshot(tt.profile)
+			snap := manager.Snapshot(tt.profile, "")
 			if tt.deviceName != "" && snap.DeviceName != tt.deviceName {
 				t.Fatalf("DeviceName = %q, want %q", snap.DeviceName, tt.deviceName)
 			}
