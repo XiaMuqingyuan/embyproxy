@@ -1,0 +1,82 @@
+name: Build ARM64
+
+on:
+  push:
+    tags:
+      - "v*"
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-arm64:
+    name: Build linux/arm64
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.4"
+          cache: true
+
+      - name: Resolve build metadata
+        id: meta
+        run: |
+          VERSION="dev"
+          COMMIT="$(git rev-parse --short HEAD)"
+          BUILT_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            VERSION="${GITHUB_REF_NAME}"
+          elif [[ -n "${GITHUB_SHA}" ]]; then
+            VERSION="$(git describe --tags --always --dirty 2>/dev/null || echo dev)"
+          fi
+
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "commit=${COMMIT}" >> "$GITHUB_OUTPUT"
+          echo "built_at=${BUILT_AT}" >> "$GITHUB_OUTPUT"
+          echo "binary_name=embyproxy-linux-arm64" >> "$GITHUB_OUTPUT"
+
+      - name: Build linux/arm64 binary
+        env:
+          GOOS: linux
+          GOARCH: arm64
+          CGO_ENABLED: 0
+        run: |
+          go build -trimpath \
+            -ldflags="-s -w \
+              -X embyproxy/internal/buildinfo.Version=${{ steps.meta.outputs.version }} \
+              -X embyproxy/internal/buildinfo.Commit=${{ steps.meta.outputs.commit }} \
+              -X embyproxy/internal/buildinfo.BuiltAt=${{ steps.meta.outputs.built_at }}" \
+            -o ${{ steps.meta.outputs.binary_name }} \
+            ./cmd/embyproxy
+
+      - name: Verify binary architecture
+        run: |
+          file ${{ steps.meta.outputs.binary_name }}
+          ls -lh ${{ steps.meta.outputs.binary_name }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: embyproxy-linux-arm64
+          path: ${{ steps.meta.outputs.binary_name }}
+          if-no-files-found: error
+
+      - name: Release (on tag)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ steps.meta.outputs.binary_name }}
+          generate_release_notes: true
