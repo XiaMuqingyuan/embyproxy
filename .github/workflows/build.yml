@@ -25,7 +25,7 @@ jobs:
           go-version-file: go.mod
 
       - name: Build
-        run: go build -o embyproxy ./cmd/embyproxy
+        run: go build ./cmd/embyproxy
 
       - name: Test
         run: go test ./...
