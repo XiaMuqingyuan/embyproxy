@@ -32,27 +32,27 @@ jobs:
 
           # Build linux/amd64
           GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -trimpath \
-            -ldflags="-s -w -X embyproxy/internal/buildinfo.Version=${DATE} -X embyproxy/internal/buildinfo.Commit=${GITHUB_SHA::7} -X embyproxy/internal/buildinfo.BuiltAt=$(TZ=Asia/Shanghai date +'%Y-%m-%dT%H:%M:%S%:z')" \
+            -ldflags="-s -w -X embyproxy/internal/buildinfo.Version=${GITHUB_REF_NAME#v} -X embyproxy/internal/buildinfo.Commit=${GITHUB_SHA::7} -X embyproxy/internal/buildinfo.BuiltAt=$(TZ=Asia/Shanghai date +'%Y-%m-%dT%H:%M:%S%:z')" \
             -o "dist/embyproxy-${DATE}-linux-amd64" ./cmd/embyproxy
 
           # Build linux/arm64
           GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -trimpath \
-            -ldflags="-s -w -X embyproxy/internal/buildinfo.Version=${DATE} -X embyproxy/internal/buildinfo.Commit=${GITHUB_SHA::7} -X embyproxy/internal/buildinfo.BuiltAt=$(TZ=Asia/Shanghai date +'%Y-%m-%dT%H:%M:%S%:z')" \
+            -ldflags="-s -w -X embyproxy/internal/buildinfo.Version=${GITHUB_REF_NAME#v} -X embyproxy/internal/buildinfo.Commit=${GITHUB_SHA::7} -X embyproxy/internal/buildinfo.BuiltAt=$(TZ=Asia/Shanghai date +'%Y-%m-%dT%H:%M:%S%:z')" \
             -o "dist/embyproxy-${DATE}-linux-arm64" ./cmd/embyproxy
 
           # Build linux/armv7
-          GOOS=linux GOARCH=arm GOARM=7 CGO_ENABLED=0 go build -trimpath \
-            -ldflags="-s -w -X embyproxy/internal/buildinfo.Version=${DATE} -X embyproxy/internal/buildinfo.Commit=${GITHUB_SHA::7} -X embyproxy/internal/buildinfo.BuiltAt=$(TZ=Asia/Shanghai date +'%Y-%m-%dT%H:%M:%S%:z')" \
+          GOOS=linux GOARCH=arm CGO_ENABLED=0 go build -trimpath \
+            -ldflags="-s -w -X embyproxy/internal/buildinfo.Version=${GITHUB_REF_NAME#v} -X embyproxy/internal/buildinfo.Commit=${GITHUB_SHA::7} -X embyproxy/internal/buildinfo.BuiltAt=$(TZ=Asia/Shanghai date +'%Y-%m-%dT%H:%M:%S%:z')" \
             -o "dist/embyproxy-${DATE}-linux-armv7" ./cmd/embyproxy
 
           # Build windows/amd64
           GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -trimpath \
-            -ldflags="-s -w -X embyproxy/internal/buildinfo.Version=${DATE} -X embyproxy/internal/buildinfo.Commit=${GITHUB_SHA::7} -X embyproxy/internal/buildinfo.BuiltAt=$(TZ=Asia/Shanghai date +'%Y-%m-%dT%H:%M:%S%:z')" \
+            -ldflags="-s -w -X embyproxy/internal/buildinfo.Version=${GITHUB_REF_NAME#v} -X embyproxy/internal/buildinfo.Commit=${GITHUB_SHA::7} -X embyproxy/internal/buildinfo.BuiltAt=$(TZ=Asia/Shanghai date +'%Y-%m-%dT%H:%M:%S%:z')" \
             -o "dist/embyproxy-${DATE}-windows-amd64.exe" ./cmd/embyproxy
 
           # Build windows/arm64
           GOOS=windows GOARCH=arm64 CGO_ENABLED=0 go build -trimpath \
-            -ldflags="-s -w -X embyproxy/internal/buildinfo.Version=${DATE} -X embyproxy/internal/buildinfo.Commit=${GITHUB_SHA::7} -X embyproxy/internal/buildinfo.BuiltAt=$(TZ=Asia/Shanghai date +'%Y-%m-%dT%H:%M:%S%:z')" \
+            -ldflags="-s -w -X embyproxy/internal/buildinfo.Version=${GITHUB_REF_NAME#v} -X embyproxy/internal/buildinfo.Commit=${GITHUB_SHA::7} -X embyproxy/internal/buildinfo.BuiltAt=$(TZ=Asia/Shanghai date +'%Y-%m-%dT%H:%M:%S%:z')" \
             -o "dist/embyproxy-${DATE}-windows-arm64.exe" ./cmd/embyproxy
 
           # Copy config file
