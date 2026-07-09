@@ -1079,6 +1079,9 @@
         font-size: 14px;
         padding: 40px 0;
       }
+      .chartjs-tooltip {
+        word-break: break-all;
+      }
       @media (max-width: 860px) {
         .charts-grid {
           grid-template-columns: 1fr;
@@ -4575,6 +4578,11 @@
       function chartFont() {
         return { family: getComputedStyle(document.body).fontFamily || "sans-serif" };
       }
+      // 截断过长的客户端名称，避免图表标签溢出
+      function truncateClient(name, max = 42) {
+        const s = String(name || "未知");
+        return s.length > max ? s.slice(0, max - 1) + "…" : s;
+      }
 
       async function loadCharts() {
         const days = parseInt(
@@ -4600,6 +4608,15 @@
             destroyChart
           );
           return;
+        }
+
+        // 节点名称映射：内部 node -> 对外显示名（displayName）
+        const nodeDisplayMap = new Map();
+        for (const n of allNodes || []) {
+          const key = String(n.name || n.Name || "").toLowerCase();
+          if (key && (n.displayName || n.DisplayName)) {
+            nodeDisplayMap.set(key, n.displayName || n.DisplayName);
+          }
         }
 
         // 1) 按天趋势：按 day 聚合 plays / sessions / 流量
@@ -4796,7 +4813,7 @@
           {
             type: "doughnut",
             data: {
-              labels: nodeEntries.map((e) => esc(e[0])),
+              labels: nodeEntries.map((e) => (nodeDisplayMap.get(e[0]) || esc(e[0]))),
               datasets: [
                 {
                   data: nodeEntries.map((e) => e[1]),
@@ -4843,7 +4860,7 @@
           {
             type: "bar",
             data: {
-              labels: clientEntries.map((e) => esc(e[0])),
+              labels: clientEntries.map((e) => truncateClient(e[0])),
               datasets: [
                 {
                   label: "播放次数",
