@@ -168,7 +168,7 @@ func PackNode(node Node) (string, error) {
 	if node.DirectExternal {
 		p.DirectExternal = 1
 	}
-	if node.KeepaliveMaxPerDay != 0 && node.KeepaliveMaxPerDay != 1 {
+	if node.KeepaliveMaxPerDay != 0 {
 		p.KeepaliveMaxPerDay = node.KeepaliveMaxPerDay
 	}
 	if !node.KeepaliveChangeOnly {

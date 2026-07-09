@@ -3769,7 +3769,7 @@
       ${n.secret ? '<span class="chip warn">密钥</span>' : '<span class="chip">公开</span>'}
       ${n.directExternal ? '<span class="chip blue">302直连</span>' : ""}
       ${n.renewDays ? '<span class="chip ok">保号</span>' : ""}
-      <span class="chip">${n.impersonate === false ? "透传" : "伪装：" + esc(identityLabel)}</span>
+      <span class="chip">${!n.impersonate ? "透传" : "伪装：" + esc(identityLabel)}</span>
     </div>
     <div class="row-actions">
       <button class="btn btn-sm btn-primary row-action" data-name="${attr(n.name)}" onclick="openEditModal(this.dataset.name)">编辑</button>
@@ -3860,7 +3860,6 @@
       function toggleSelect(name, checked) {
         if (checked) selectedNodes.add(name);
         else selectedNodes.delete(name);
-        focusedNodeName = name;
         filterNodes();
       }
 
@@ -3979,10 +3978,10 @@
           ),
           impersonateDeviceName: g("impersonateDeviceName"),
           directExternal: document.getElementById("f-directExternal").checked,
-          renewDays: parseInt(g("renewDays") || "0"),
-          remindBeforeDays: parseInt(g("remindBeforeDays") || "0"),
+          renewDays: parseInt(g("renewDays") || "0", 10) || 0,
+          remindBeforeDays: parseInt(g("remindBeforeDays") || "0", 10) || 0,
           keepaliveAt: g("keepaliveAt"),
-          keepaliveMaxPerDay: parseInt(g("keepaliveMaxPerDay") || "1"),
+          keepaliveMaxPerDay: parseInt(g("keepaliveMaxPerDay") || "1", 10) || 1,
           keepaliveChangeOnly: document.getElementById("f-keepaliveChangeOnly")
             .checked,
           fav: editingNode?.fav || false,
@@ -4028,7 +4027,7 @@
         const r = await api("toggleFav", { name });
         if (r.ok) {
           await loadNodes();
-        }
+        } else toast("操作失败: " + r.error, "err");
       }
 
       async function batchTagSelected() {
@@ -4398,16 +4397,19 @@
           ).checked,
           imageProxyMaxConcurrent: parseInt(
             document.getElementById("cfg-imageProxyMaxConcurrent").value || "4",
-          ),
+            10,
+          ) || 4,
           imageProxyRequestIntervalMs: parseInt(
             document.getElementById("cfg-imageProxyRequestIntervalMs").value ||
               "250",
-          ),
+            10,
+          ) || 250,
           imageCacheEnabled: document.getElementById("cfg-imageCacheEnabled")
             .checked,
           imageCacheTtlDays: parseInt(
             document.getElementById("cfg-imageCacheTtlDays").value || "30",
-          ),
+            10,
+          ) || 30,
           corsAllowOrigin: document
             .getElementById("cfg-corsAllowOrigin")
             .value.trim(),

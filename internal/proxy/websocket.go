@@ -95,6 +95,7 @@ func (h *Handler) tryWebSocketTarget(ctx context.Context, w http.ResponseWriter,
 		return false
 	}
 	if res.StatusCode != http.StatusSwitchingProtocols {
+		_ = res.Body.Close()
 		_ = upstreamConn.Close()
 		h.log.Warn("ws", "upstream rejected upgrade", map[string]any{"event": "upstreamRejectedUpgrade", "id": requestID, "node": parsed.Name, "target": logging.FormatTarget(target), "status": res.StatusCode})
 		return false

@@ -132,14 +132,19 @@ func ExtractToken(r *http.Request) string {
 
 func ClientIP(r *http.Request, trustProxy bool) string {
 	if trustProxy {
-		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-			first := strings.TrimSpace(strings.Split(xff, ",")[0])
-			if first != "" {
-				return first
+		host, _, err := net.SplitHostPort(r.RemoteAddr)
+		if err == nil {
+			if ip := net.ParseIP(host); ip != nil && isPrivateIP(ip) {
+				if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+					first := strings.TrimSpace(strings.Split(xff, ",")[0])
+					if first != "" {
+						return first
+					}
+				}
+				if xr := strings.TrimSpace(r.Header.Get("X-Real-IP")); xr != "" {
+					return xr
+				}
 			}
-		}
-		if xr := strings.TrimSpace(r.Header.Get("X-Real-IP")); xr != "" {
-			return xr
 		}
 	}
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
@@ -150,4 +155,14 @@ func ClientIP(r *http.Request, trustProxy bool) string {
 		return r.RemoteAddr
 	}
 	return "unknown"
+}
+
+func isPrivateIP(ip net.IP) bool {
+	if ip == nil {
+		return false
+	}
+	if ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsPrivate() {
+		return true
+	}
+	return false
 }

@@ -114,7 +114,7 @@ func (s *Service) CheckAndSendReport(ctx context.Context) error {
 	if reportTime == "" {
 		reportTime = "00:00"
 	}
-	if hhmm < reportTime {
+	if compareHHMM(hhmm, reportTime) < 0 {
 		return nil
 	}
 	kv := s.store.KV()
@@ -424,4 +424,35 @@ func mustKVGet(ctx context.Context, kv *storage.KV, key string) string {
 func int64Value(value string) int64 {
 	n, _ := strconv.ParseInt(strings.TrimSpace(value), 10, 64)
 	return n
+}
+
+// compareHHMM compares two "HH:MM" strings numerically.
+// Returns -1 if a < b, 0 if equal, +1 if a > b.
+func compareHHMM(a, b string) int {
+	ah, am := parseHHMM(a)
+	bh, bm := parseHHMM(b)
+	amin := ah*60 + am
+	bmin := bh*60 + bm
+	switch {
+	case amin < bmin:
+		return -1
+	case amin > bmin:
+		return 1
+	default:
+		return 0
+	}
+}
+
+func parseHHMM(s string) (int, int) {
+	var h, m int
+	if _, err := fmt.Sscanf(s, "%d:%d", &h, &m); err != nil {
+		return 0, 0
+	}
+	if h < 0 || h > 23 {
+		h = 0
+	}
+	if m < 0 || m > 59 {
+		m = 0
+	}
+	return h, m
 }
