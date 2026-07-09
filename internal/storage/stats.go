@@ -693,3 +693,37 @@ func playbackBucketStart(ts int64) int64 {
 	}
 	return ts - ts%playbackBucketMillis
 }
+
+// GetHourlyStats aggregates play_buckets into hourly buckets within the last
+// `hours` window (play_buckets only retains ~3 days, so older windows return
+// no rows). Used by the admin "可视化" charts for the hourly trend.
+func (s *Store) GetHourlyStats(ctx context.Context, hours int) ([]HourlyStat, error) {
+	if hours <= 0 {
+		hours = 72
+	}
+	cutoff := playbackBucketStart(time.Now().Add(-time.Duration(hours) * time.Hour).UnixMilli())
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT
+			(bucket_start / 3600000) * 3600000 AS hour_start,
+			SUM(plays), SUM(sessions),
+			SUM(inbound_bytes), SUM(outbound_bytes), SUM(errors)
+		FROM play_buckets
+		WHERE bucket_start >= ?
+		GROUP BY hour_start
+		ORDER BY hour_start ASC
+	`, cutoff)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []HourlyStat{}
+	for rows.Next() {
+		var h HourlyStat
+		if err := rows.Scan(&h.Hour, &h.Plays, &h.Sessions, &h.InboundBytes, &h.OutboundBytes, &h.Errors); err != nil {
+			return nil, err
+		}
+		h.Bytes = h.InboundBytes + h.OutboundBytes
+		out = append(out, h)
+	}
+	return out, rows.Err()
+}

@@ -67,7 +67,7 @@ var Profiles = map[string]Profile{
 		ClientVersion:  "2.0.4.6",
 		DeviceName:     "Xiaomi-23046RP50C",
 		DeviceIDFormat: "uuid",
-		UserAgent:      "Yamby/2.0.4.6(Android)",
+		UserAgent:      "Yamby/2.0.4.6 (Android)",
 	},
 	"hills_android": {
 		Key:            "hills_android",

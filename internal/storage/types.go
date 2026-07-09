@@ -104,6 +104,16 @@ type TodayStats struct {
 	Yesterday []PlayStat `json:"yesterday"`
 }
 
+type HourlyStat struct {
+	Hour          int64 `json:"hour"`
+	Plays         int64 `json:"plays"`
+	Sessions      int64 `json:"sessions"`
+	InboundBytes  int64 `json:"inboundBytes"`
+	OutboundBytes int64 `json:"outboundBytes"`
+	Errors        int64 `json:"errors"`
+	Bytes         int64 `json:"bytes"`
+}
+
 type KeepaliveState struct {
 	Node           string
 	AnchorTS       int64

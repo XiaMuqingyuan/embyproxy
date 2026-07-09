@@ -4,6 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <title>Emby Management</title>
+    <script src="/admin/chart.js"></script>
     <style>
       :root {
         color-scheme: light;
@@ -1039,6 +1040,52 @@
         letter-spacing: 0.14em;
         font-weight: 950;
         color: var(--ink-3);
+      }
+      .charts-hint {
+        font-size: 11px;
+        color: var(--ink-3);
+        margin-left: 4px;
+      }
+      .charts-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 16px;
+        margin-top: 14px;
+      }
+      .chart-card {
+        background: var(--paper);
+        border: 1px solid rgba(255, 253, 248, 0.88);
+        border-radius: 30px;
+        padding: 18px 20px 20px;
+        box-shadow: 0 16px 48px rgba(58, 48, 32, 0.08);
+      }
+      .chart-card-wide {
+        grid-column: span 2;
+      }
+      .chart-title {
+        font-size: 13px;
+        font-weight: 800;
+        color: var(--ink-2);
+        margin-bottom: 12px;
+      }
+      .chart-wrap {
+        position: relative;
+        height: 280px;
+      }
+      .charts-empty {
+        margin-top: 24px;
+        text-align: center;
+        color: var(--ink-3);
+        font-size: 14px;
+        padding: 40px 0;
+      }
+      @media (max-width: 860px) {
+        .charts-grid {
+          grid-template-columns: 1fr;
+        }
+        .chart-card-wide {
+          grid-column: span 1;
+        }
       }
       .data-table {
         background: var(--paper);
@@ -2333,6 +2380,9 @@
             <button class="rail-button" onclick="switchTab('logs', this)">
               日志
             </button>
+            <button class="rail-button" onclick="switchTab('charts', this)">
+              可视化
+            </button>
           </nav>
           <div class="rail-bottom">
             <button class="rail-mini" onclick="openConfigModal()">配置</button>
@@ -2476,6 +2526,55 @@
                   </thead>
                   <tbody id="statsBody"></tbody>
                 </table>
+              </div>
+            </section>
+
+            <section id="tabCharts" class="stats-deck" style="display: none">
+              <div class="stats-top">
+                <select
+                  id="chartsDays"
+                  class="select-input"
+                  onchange="loadCharts()"
+                >
+                  <option value="1">今天</option>
+                  <option value="7" selected>近 7 天</option>
+                  <option value="30">近 30 天</option>
+                </select>
+                <span class="charts-hint">按天趋势与排行取所选范围；按小时趋势固定取近 72 小时（play_buckets 仅保留 3 天）</span>
+                <div class="action-pack">
+                  <button class="primary-action" onclick="loadCharts()">
+                    刷新
+                  </button>
+                </div>
+              </div>
+              <div class="charts-grid">
+                <div class="chart-card chart-card-wide">
+                  <div class="chart-title">按天趋势（播放 / 会话 / 流量）</div>
+                  <div class="chart-wrap">
+                    <canvas id="chartTrend"></canvas>
+                  </div>
+                </div>
+                <div class="chart-card chart-card-wide">
+                  <div class="chart-title">按小时趋势（播放 / 流量，近 72 小时）</div>
+                  <div class="chart-wrap">
+                    <canvas id="chartHourly"></canvas>
+                  </div>
+                </div>
+                <div class="chart-card">
+                  <div class="chart-title">节点播放占比</div>
+                  <div class="chart-wrap">
+                    <canvas id="chartByNode"></canvas>
+                  </div>
+                </div>
+                <div class="chart-card">
+                  <div class="chart-title">客户端播放排行</div>
+                  <div class="chart-wrap">
+                    <canvas id="chartByClient"></canvas>
+                  </div>
+                </div>
+              </div>
+              <div id="chartsEmpty" class="charts-empty" style="display: none">
+                暂无播放统计数据
               </div>
             </section>
 
@@ -3384,7 +3483,7 @@
           .querySelectorAll(".rail-button")
           .forEach((t) => t.classList.remove("active"));
         btn.classList.add("active");
-        const tabs = { nodes: "tabNodes", stats: "tabStats", logs: "tabLogs" };
+        const tabs = { nodes: "tabNodes", stats: "tabStats", logs: "tabLogs", charts: "tabCharts" };
         for (const [key, id] of Object.entries(tabs)) {
           const el = document.getElementById(id);
           if (el) el.style.display = key === name ? "" : "none";
@@ -3401,6 +3500,11 @@
             "查看近期播放次数、会话数与客户端分布",
           ],
           logs: ["运行日志", "运行日志", "查看服务运行期间产生的日志"],
+          charts: [
+            "播放可视化",
+            "播放可视化",
+            "以图表形式查看播放趋势、节点与客户端分布",
+          ],
         }[name] || [
           "媒体中枢",
           "Emby 服务器管理",
@@ -3416,6 +3520,9 @@
           loadLogs();
           if (document.getElementById("logAutoRefresh")?.checked)
             syncLogRealtime();
+        } else if (name === "charts") {
+          stopLogRealtime("待机", "paused");
+          loadCharts();
         } else {
           stopLogRealtime("待机", "paused");
           renderHeadStatus();
@@ -4445,6 +4552,318 @@
 
       function trafficOutboundBytes(stat) {
         return Number(stat?.outboundBytes || 0);
+      }
+
+      // ---- 播放可视化 ----
+      const chartInstances = {};
+      function destroyChart(key) {
+        if (chartInstances[key]) {
+          chartInstances[key].destroy();
+          delete chartInstances[key];
+        }
+      }
+      function renderChart(key, ctx, config) {
+        destroyChart(key);
+        chartInstances[key] = new Chart(ctx, config);
+      }
+      // 用主题色生成一组对比色
+      const chartPalette = [
+        "#24594d", "#bd6a34", "#237547", "#315f8f",
+        "#a83b32", "#8a6d3b", "#5b6e3a", "#6b4a7a",
+        "#3a7c8c", "#b05a6e",
+      ];
+      function chartFont() {
+        return { family: getComputedStyle(document.body).fontFamily || "sans-serif" };
+      }
+
+      async function loadCharts() {
+        const days = parseInt(
+          document.getElementById("chartsDays")?.value || "7"
+        );
+        const [dayRes, hourRes] = await Promise.all([
+          api("stats.get", { days }),
+          api("stats.hourly", { hours: 72 }),
+        ]);
+        if (!dayRes.ok) {
+          toast("加载统计失败", "err");
+          return;
+        }
+        const stats = dayRes.stats || [];
+        const hourly = hourRes.ok ? hourRes.stats || [] : [];
+
+        const isEmpty = stats.length === 0 && hourly.length === 0;
+        document.getElementById("chartsEmpty").style.display = isEmpty
+          ? ""
+          : "none";
+        if (isEmpty) {
+          ["chartTrend", "chartHourly", "chartByNode", "chartByClient"].forEach(
+            destroyChart
+          );
+          return;
+        }
+
+        // 1) 按天趋势：按 day 聚合 plays / sessions / 流量
+        const dayMap = new Map();
+        for (const s of stats) {
+          const d = s.day;
+          if (!dayMap.has(d))
+            dayMap.set(d, { plays: 0, sessions: 0, inbound: 0, outbound: 0 });
+          const row = dayMap.get(d);
+          row.plays += Number(s.plays || 0);
+          row.sessions += Number(s.sessions || 0);
+          row.inbound += trafficInboundBytes(s);
+          row.outbound += trafficOutboundBytes(s);
+        }
+        const daysSorted = [...dayMap.keys()].sort();
+        const trendPlays = daysSorted.map((d) => dayMap.get(d).plays);
+        const trendSessions = daysSorted.map((d) => dayMap.get(d).sessions);
+        const trendTraffic = daysSorted.map((d) =>
+          dayMap.get(d).inbound + dayMap.get(d).outbound
+        );
+
+        renderChart(
+          "chartTrend",
+          document.getElementById("chartTrend"),
+          {
+            type: "line",
+            data: {
+              labels: daysSorted,
+              datasets: [
+                {
+                  label: "播放次数",
+                  data: trendPlays,
+                  borderColor: chartPalette[0],
+                  backgroundColor: "rgba(36,89,77,0.12)",
+                  yAxisID: "y",
+                  tension: 0.3,
+                  fill: true,
+                },
+                {
+                  label: "会话数",
+                  data: trendSessions,
+                  borderColor: chartPalette[1],
+                  backgroundColor: "rgba(189,106,52,0.12)",
+                  yAxisID: "y",
+                  tension: 0.3,
+                  fill: false,
+                },
+                {
+                  label: "流量",
+                  data: trendTraffic,
+                  borderColor: chartPalette[2],
+                  backgroundColor: "rgba(35,117,71,0.10)",
+                  yAxisID: "y1",
+                  tension: 0.3,
+                  fill: false,
+                },
+              ],
+            },
+            options: {
+              responsive: true,
+              maintainAspectRatio: false,
+              interaction: { mode: "index", intersect: false },
+              plugins: {
+                legend: { labels: chartFont() },
+                tooltip: {
+                  callbacks: {
+                    label: (c) =>
+                      c.dataset.label === "流量"
+                        ? `${c.dataset.label}: ${formatBytes(c.parsed.y)}`
+                        : `${c.dataset.label}: ${c.parsed.y}`,
+                  },
+                },
+              },
+              scales: {
+                y: {
+                  type: "linear",
+                  position: "left",
+                  beginAtZero: true,
+                  title: { display: true, text: "次数 / 会话", ...chartFont() },
+                  ticks: chartFont(),
+                },
+                y1: {
+                  type: "linear",
+                  position: "right",
+                  beginAtZero: true,
+                  grid: { drawOnChartArea: false },
+                  title: { display: true, text: "流量", ...chartFont() },
+                  ticks: {
+                    ...chartFont(),
+                    callback: (v) => formatBytes(v),
+                  },
+                },
+                x: { ticks: chartFont() },
+              },
+            },
+          }
+        );
+
+        // 2) 按小时趋势（近 72 小时）
+        const hourLabels = hourly.map((h) => {
+          const dt = new Date(Number(h.hour));
+          const mm = String(dt.getMonth() + 1).padStart(2, "0");
+          const dd = String(dt.getDate()).padStart(2, "0");
+          const hh = String(dt.getHours()).padStart(2, "0");
+          return `${mm}-${dd} ${hh}:00`;
+        });
+        const hourPlays = hourly.map((h) => Number(h.plays || 0));
+        const hourTraffic = hourly.map(
+          (h) => Number(h.inboundBytes || 0) + Number(h.outboundBytes || 0)
+        );
+        renderChart(
+          "chartHourly",
+          document.getElementById("chartHourly"),
+          {
+            type: "bar",
+            data: {
+              labels: hourLabels,
+              datasets: [
+                {
+                  label: "播放次数",
+                  data: hourPlays,
+                  backgroundColor: "rgba(36,89,77,0.55)",
+                  yAxisID: "y",
+                },
+                {
+                  label: "流量",
+                  data: hourTraffic,
+                  type: "line",
+                  borderColor: chartPalette[3],
+                  backgroundColor: "rgba(49,95,143,0.10)",
+                  yAxisID: "y1",
+                  tension: 0.3,
+                  fill: false,
+                },
+              ],
+            },
+            options: {
+              responsive: true,
+              maintainAspectRatio: false,
+              interaction: { mode: "index", intersect: false },
+              plugins: {
+                legend: { labels: chartFont() },
+                tooltip: {
+                  callbacks: {
+                    label: (c) =>
+                      c.dataset.label === "流量"
+                        ? `${c.dataset.label}: ${formatBytes(c.parsed.y)}`
+                        : `${c.dataset.label}: ${c.parsed.y}`,
+                  },
+                },
+              },
+              scales: {
+                y: {
+                  type: "linear",
+                  position: "left",
+                  beginAtZero: true,
+                  title: { display: true, text: "播放次数", ...chartFont() },
+                  ticks: chartFont(),
+                },
+                y1: {
+                  type: "linear",
+                  position: "right",
+                  beginAtZero: true,
+                  grid: { drawOnChartArea: false },
+                  title: { display: true, text: "流量", ...chartFont() },
+                  ticks: { ...chartFont(), callback: (v) => formatBytes(v) },
+                },
+                x: {
+                  ticks: {
+                    ...chartFont(),
+                    maxTicksLimit: 12,
+                    autoSkip: true,
+                  },
+                },
+              },
+            },
+          }
+        );
+
+        // 3) 节点播放占比（饼图）
+        const nodeMap = new Map();
+        for (const s of stats) {
+          nodeMap.set(
+            s.node,
+            (nodeMap.get(s.node) || 0) + Number(s.plays || 0)
+          );
+        }
+        const nodeEntries = [...nodeMap.entries()].sort(
+          (a, b) => b[1] - a[1]
+        );
+        renderChart(
+          "chartByNode",
+          document.getElementById("chartByNode"),
+          {
+            type: "doughnut",
+            data: {
+              labels: nodeEntries.map((e) => esc(e[0])),
+              datasets: [
+                {
+                  data: nodeEntries.map((e) => e[1]),
+                  backgroundColor: nodeEntries.map(
+                    (_, i) => chartPalette[i % chartPalette.length]
+                  ),
+                },
+              ],
+            },
+            options: {
+              responsive: true,
+              maintainAspectRatio: false,
+              plugins: {
+                legend: { position: "right", labels: chartFont() },
+                tooltip: {
+                  callbacks: {
+                    label: (c) =>
+                      `${c.label}: ${c.parsed} 次 (${(
+                        (c.parsed /
+                          nodeEntries.reduce((s, e) => s + e[1], 0)) *
+                        100
+                      ).toFixed(1)}%)`,
+                  },
+                },
+              },
+            },
+          }
+        );
+
+        // 4) 客户端播放排行（横向柱状）
+        const clientMap = new Map();
+        for (const s of stats) {
+          clientMap.set(
+            s.client,
+            (clientMap.get(s.client) || 0) + Number(s.plays || 0)
+          );
+        }
+        const clientEntries = [...clientMap.entries()]
+          .sort((a, b) => a[1] - b[1])
+          .slice(-10);
+        renderChart(
+          "chartByClient",
+          document.getElementById("chartByClient"),
+          {
+            type: "bar",
+            data: {
+              labels: clientEntries.map((e) => esc(e[0])),
+              datasets: [
+                {
+                  label: "播放次数",
+                  data: clientEntries.map((e) => e[1]),
+                  backgroundColor: chartPalette[2],
+                },
+              ],
+            },
+            options: {
+              indexAxis: "y",
+              responsive: true,
+              maintainAspectRatio: false,
+              plugins: { legend: { display: false } },
+              scales: {
+                x: { beginAtZero: true, ticks: chartFont() },
+                y: { ticks: chartFont() },
+              },
+            },
+          }
+        );
       }
 
       function formatBytes(bytes) {

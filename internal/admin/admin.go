@@ -37,6 +37,9 @@ import (
 //go:embed static/index.html
 var indexHTML string
 
+//go:embed static/chart.umd.min.js
+var chartJS string
+
 type ResetFunc func(uid, name string)
 
 type ImageCacheManager interface {
@@ -101,6 +104,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		h.serveIndex(w, r)
+		return
+	}
+	if r.Method == http.MethodGet && path == "/admin/chart.js" {
+		w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
+		w.Write([]byte(chartJS))
 		return
 	}
 	capture.SetMeta(r, map[string]any{"mode": "admin", "stage": "admin-auth"})
@@ -343,6 +351,13 @@ func (h *Handler) dispatch(ctx context.Context, uid, action string, body map[str
 	case "stats.get":
 		days := clamp(intValue(body["days"], 7), 1, 30)
 		stats, err := h.store.GetPlayStats(ctx, days)
+		if err != nil {
+			return fail(err.Error()), http.StatusInternalServerError
+		}
+		return map[string]any{"ok": true, "stats": stats}, http.StatusOK
+	case "stats.hourly":
+		hours := clamp(intValue(body["hours"], 72), 1, 72)
+		stats, err := h.store.GetHourlyStats(ctx, hours)
 		if err != nil {
 			return fail(err.Error()), http.StatusInternalServerError
 		}
