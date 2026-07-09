@@ -3,7 +3,7 @@ package buildinfo
 import "fmt"
 
 // Version is the release version injected at build time.
-var Version = "dev"
+var Version = "1.0.5"
 
 // Commit is the short Git commit injected at build time.
 var Commit = "unknown"

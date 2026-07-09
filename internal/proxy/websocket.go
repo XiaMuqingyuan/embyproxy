@@ -103,19 +103,19 @@ func (h *Handler) tryWebSocketTarget(ctx context.Context, w http.ResponseWriter,
 	if !ok {
 		_ = upstreamConn.Close()
 		http.Error(w, "WebSocket hijack not supported", http.StatusInternalServerError)
-		return true
+		return false
 	}
 	clientConn, clientRW, err := hijacker.Hijack()
 	if err != nil {
 		_ = upstreamConn.Close()
 		h.log.Warn("ws", "client hijack failed", map[string]any{"event": "clientHijackFailed", "id": requestID, "node": parsed.Name, "error": err.Error()})
-		return true
+		return false
 	}
 	if err := writeWebSocketResponse(clientConn, res); err != nil {
 		_ = clientConn.Close()
 		_ = upstreamConn.Close()
 		h.log.Warn("ws", "write upgrade response failed", map[string]any{"event": "writeUpgradeResponseFailed", "id": requestID, "node": parsed.Name, "error": err.Error()})
-		return true
+		return false
 	}
 	h.markTargetHealthy("admin:"+parsed.Name, targets, target, expectedActive)
 	capture.SetMeta(r, map[string]any{"mode": "ws", "node": parsed.Name, "secret": node.Secret, "stage": "upgraded", "targetUrl": targetURL.String(), "outboundHeaders": headers})
@@ -254,7 +254,9 @@ func flushBuffered(dst io.Writer, reader *bufio.Reader) {
 	}
 	for reader.Buffered() > 0 {
 		n := reader.Buffered()
-		_, _ = io.CopyN(dst, reader, int64(n))
+		if _, err := io.CopyN(dst, reader, int64(n)); err != nil {
+			return
+		}
 	}
 }
 

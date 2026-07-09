@@ -3474,7 +3474,15 @@
             },
             body: JSON.stringify({ action, ...data }),
           });
-          return await r.json();
+          if (!r.ok) {
+            const text = await r.text().catch(() => "");
+            return { ok: false, error: "HTTP " + r.status + (text ? " " + text : "") };
+          }
+          try {
+            return await r.json();
+          } catch (e) {
+            return { ok: false, error: "响应解析失败: " + e.message };
+          }
         } catch (e) {
           return { ok: false, error: e.message };
         }
@@ -3737,11 +3745,11 @@
         const checkClass = check ? " " + check.type : "";
         const checkTitle = check ? check.text : "检测延时";
         const eyeIcon = showProxy ? EYE_ICONS.open : EYE_ICONS.closed;
-        return `<article class="route-row${sel ? " selected" : ""}${focused ? " focused" : ""}" id="row-${n.name}" onclick="focusNodeCard(event,'${n.name}')" ondragover="onNodeDragOver(event,'${n.name}')" ondragenter="onNodeDragEnter(event,'${n.name}')" ondrop="onNodeDrop(event,'${n.name}')">
+        return `<article class="route-row${sel ? " selected" : ""}${focused ? " focused" : ""}" id="row-${n.name}" data-name="${attr(n.name)}" onclick="focusNodeCard(event,this.dataset.name)" ondragover="onNodeDragOver(event,this.dataset.name)" ondragenter="onNodeDragEnter(event,this.dataset.name)" ondrop="onNodeDrop(event,this.dataset.name)">
     <div class="route-tools">
-      <span class="drag-handle" draggable="true" ondragstart="onNodeDragStart(event,'${n.name}')" ondragend="onNodeDragEnd()" title="拖动排序">↕</span>
-      <input type="checkbox" class="row-check" ${sel ? "checked" : ""} onchange="toggleSelect('${n.name}',this.checked)"/>
-      <button class="fav-star ${n.fav ? "on" : ""}" onclick="toggleFav('${n.name}')" title="收藏" aria-label="收藏">★</button>
+      <span class="drag-handle" draggable="true" data-name="${attr(n.name)}" ondragstart="onNodeDragStart(event,this.dataset.name)" ondragend="onNodeDragEnd()" title="拖动排序">↕</span>
+      <input type="checkbox" class="row-check" ${sel ? "checked" : ""} data-name="${attr(n.name)}" onchange="toggleSelect(this.dataset.name,this.checked)"/>
+      <button class="fav-star ${n.fav ? "on" : ""}" data-name="${attr(n.name)}" onclick="toggleFav(this.dataset.name)" title="收藏" aria-label="收藏">★</button>
     </div>
     <div class="identity">
       <strong>${esc(n.displayName || n.name)}</strong>
@@ -3750,7 +3758,7 @@
       <div class="proxy-line">
         <div class="mono${showProxy ? "" : " is-hidden"}">
           <span class="proxy-text">${showProxy ? esc(proxyUrl) : HIDDEN_PROXY_TEXT}</span>
-          <button class="reveal-button${showProxy ? " on" : ""}" onclick="toggleProxyUrl('${n.name}')" title="${showProxy ? "隐藏访问地址" : "显示访问地址"}" aria-label="${showProxy ? "隐藏访问地址" : "显示访问地址"}">${eyeIcon}</button>
+          <button class="reveal-button${showProxy ? " on" : ""}" data-name="${attr(n.name)}" onclick="toggleProxyUrl(this.dataset.name)" title="${showProxy ? "隐藏访问地址" : "显示访问地址"}" aria-label="${showProxy ? "隐藏访问地址" : "显示访问地址"}">${eyeIcon}</button>
         </div>
         <button class="copy-button" data-copy="${attr(proxyUrl)}" onclick="copyText(this.dataset.copy)">复制</button>
       </div>
@@ -3764,10 +3772,10 @@
       <span class="chip">${n.impersonate === false ? "透传" : "伪装：" + esc(identityLabel)}</span>
     </div>
     <div class="row-actions">
-      <button class="btn btn-sm btn-primary row-action" onclick="openEditModal('${n.name}')">编辑</button>
-      <button class="btn btn-sm row-action check-action${checkClass}" title="${attr(checkTitle)}" onclick="checkNodeStatus('${n.name}')">${esc(checkText)}</button>
+      <button class="btn btn-sm btn-primary row-action" data-name="${attr(n.name)}" onclick="openEditModal(this.dataset.name)">编辑</button>
+      <button class="btn btn-sm row-action check-action${checkClass}" title="${attr(checkTitle)}" data-name="${attr(n.name)}" onclick="checkNodeStatus(this.dataset.name)">${esc(checkText)}</button>
       ${n.renewDays ? `<button class="btn btn-sm" data-name="${attr(n.name)}" data-display="${attr(n.displayName || n.name)}" data-renew="${Number(n.renewDays || 0)}" data-remind="${Number(n.remindBeforeDays || 0)}" data-at="${attr(n.keepaliveAt || "00:00")}" onclick="testKeepaliveFromButton(this)">保号测试</button>` : ""}
-      <button class="btn btn-sm btn-danger row-action" onclick="deleteNode('${n.name}')">删除</button>
+      <button class="btn btn-sm btn-danger row-action" data-name="${attr(n.name)}" onclick="deleteNode(this.dataset.name)">删除</button>
     </div>
   </article>`;
       }
@@ -4515,7 +4523,7 @@
           ? stats
               .map(
                 (s) => `
-    <tr><td>${s.day}</td><td>${esc(s.node)}</td><td>${esc(s.client)}</td><td>${s.plays}</td><td>${s.sessions}</td><td>${formatBytes(trafficInboundBytes(s))}</td><td>${formatBytes(trafficOutboundBytes(s))}</td></tr>
+    <tr><td>${esc(s.day)}</td><td>${esc(s.node)}</td><td>${esc(s.client)}</td><td>${s.plays}</td><td>${s.sessions}</td><td>${formatBytes(trafficInboundBytes(s))}</td><td>${formatBytes(trafficOutboundBytes(s))}</td></tr>
   `,
               )
               .join("")
