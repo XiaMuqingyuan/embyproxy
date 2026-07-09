@@ -1072,6 +1072,9 @@
         position: relative;
         height: 280px;
       }
+      .chart-wrap-tall {
+        height: 520px;
+      }
       .charts-empty {
         margin-top: 24px;
         text-align: center;
@@ -2571,7 +2574,7 @@
                 </div>
                 <div class="chart-card">
                   <div class="chart-title">客户端播放排行</div>
-                  <div class="chart-wrap">
+                  <div class="chart-wrap chart-wrap-tall">
                     <canvas id="chartByClient"></canvas>
                   </div>
                 </div>
@@ -2859,7 +2862,7 @@
       class="sheet-layer"
       id="importModal"
       style="display: none"
-      onclick="if (event.target === this) closeImportModal();"
+      onclick="if (event.target === this) hideModal('importModal');"
     >
       <div class="sheet">
         <div class="sheet-head">
@@ -2867,7 +2870,7 @@
             <h2>批量导入</h2>
             <p>上传或粘贴配置 JSON，导入后会刷新当前面板</p>
           </div>
-          <button class="sheet-close" onclick="closeImportModal()">×</button>
+          <button class="sheet-close" onclick="hideModal('importModal')">×</button>
         </div>
         <div class="form-group form-spaced">
           <label for="importFile">选择 JSON 文件</label>
@@ -2887,7 +2890,7 @@
           ></textarea>
         </div>
         <div class="form-actions">
-          <button class="btn" onclick="closeImportModal()">取消</button>
+          <button class="btn" onclick="hideModal('importModal')">取消</button>
           <button class="primary-action" onclick="doImport()">执行导入</button>
         </div>
       </div>
@@ -2897,7 +2900,7 @@
       class="sheet-layer"
       id="configModal"
       style="display: none"
-      onclick="if (event.target === this) closeConfigModal();"
+      onclick="if (event.target === this) hideModal('configModal');"
     >
       <div class="sheet config-sheet">
         <div class="sheet-head">
@@ -2905,7 +2908,7 @@
             <h2>系统配置</h2>
             <p>管理播放兼容、图片、日志、安全访问与运维诊断配置</p>
           </div>
-          <button class="sheet-close" onclick="closeConfigModal()">×</button>
+          <button class="sheet-close" onclick="hideModal('configModal')">×</button>
         </div>
         <div class="config-shell" id="configForm">
           <aside class="config-map" aria-label="系统配置分组">
@@ -3286,7 +3289,7 @@
           </div>
         </div>
         <div class="form-actions">
-          <button class="btn" onclick="closeConfigModal()">取消</button>
+          <button class="btn" onclick="hideModal('configModal')">取消</button>
           <button class="primary-action" onclick="saveConfig()">
             保存配置
           </button>
@@ -3298,7 +3301,7 @@
       class="sheet-layer"
       id="tgModal"
       style="display: none"
-      onclick="if (event.target === this) closeTgModal();"
+      onclick="if (event.target === this) hideModal('tgModal');"
     >
       <div class="sheet">
         <div class="sheet-head">
@@ -3306,7 +3309,7 @@
             <h2>Telegram 通知</h2>
             <p>配置推送通道与每日日报</p>
           </div>
-          <button class="sheet-close" onclick="closeTgModal()">×</button>
+          <button class="sheet-close" onclick="hideModal('tgModal')">×</button>
         </div>
         <div class="form-grid" id="tgForm">
           <div class="form-section">通道设置</div>
@@ -3315,7 +3318,7 @@
             <input
               type="checkbox"
               id="tg-enabled"
-              onchange="syncTgNotificationControls()"
+              onchange="syncTgReportControls()"
             />
             <label for="tg-enabled">启用 Telegram 通知</label>
           </div>
@@ -3369,7 +3372,7 @@
         </div>
         <div class="form-actions">
           <button class="btn" onclick="testTg()">测试推送</button>
-          <button class="btn" onclick="closeTgModal()">取消</button>
+          <button class="btn" onclick="hideModal('tgModal')">取消</button>
           <button class="primary-action" onclick="saveTg()">保存配置</button>
         </div>
       </div>
@@ -4080,9 +4083,6 @@
         if (file) file.value = "";
         showModal("importModal");
       }
-      function closeImportModal() {
-        hideModal("importModal");
-      }
 
       async function loadImportFile(file) {
         if (!file) return;
@@ -4112,7 +4112,7 @@
         if (r.ok) {
           const ok = r.results.filter((x) => x.ok).length;
           const fail = r.results.filter((x) => !x.ok);
-          closeImportModal();
+          hideModal('importModal');
           toast(
             `导入完成: ${ok} 成功${fail.length ? " / " + fail.length + " 失败" : ""}`,
             ok ? "ok" : "err",
@@ -4142,22 +4142,6 @@
           nodes,
         );
         toast(`已导出 ${nodes.length} 个节点`, "ok");
-      }
-
-      function formatExternalAllowHosts(value) {
-        return String(value || "")
-          .split(",")
-          .map((x) => x.trim())
-          .filter(Boolean)
-          .join("\n");
-      }
-
-      function formatCORSAllowOrigin(value) {
-        return String(value || "")
-          .split(",")
-          .map((x) => x.trim())
-          .filter(Boolean)
-          .join("\n");
       }
 
       function formatCommaList(value) {
@@ -4218,9 +4202,9 @@
           document.getElementById("cfg-imageCacheTtlDays").value =
             c.imageCacheTtlDays ?? 30;
           document.getElementById("cfg-corsAllowOrigin").value =
-            formatCORSAllowOrigin(c.corsAllowOrigin);
+            formatCommaList(c.corsAllowOrigin);
           document.getElementById("cfg-externalAllowHosts").value =
-            formatExternalAllowHosts(c.externalAllowHosts);
+            formatCommaList(c.externalAllowHosts);
           document.getElementById("cfg-externalAllowAny").checked =
             !!c.externalAllowAny;
           document.getElementById("cfg-trustProxy").checked =
@@ -4240,9 +4224,6 @@
         refreshTrafficCaptureStats(false);
       }
 
-      function closeConfigModal() {
-        hideModal("configModal");
-      }
 
       function scrollConfigGroup(id, btn) {
         const group = document.getElementById(id);
@@ -4437,7 +4418,7 @@
         };
         const r = await api("config.set", { config });
         if (r.ok) {
-          closeConfigModal();
+          hideModal('configModal');
           toast("系统配置已保存", "ok");
         } else toast("保存失败: " + r.error, "err");
       }
@@ -4454,16 +4435,8 @@
           document.getElementById("tg-reportTime").value =
             c.reportTime || "08:00";
         }
-        syncTgNotificationControls();
-        showModal("tgModal");
-      }
-
-      function closeTgModal() {
-        hideModal("tgModal");
-      }
-
-      function syncTgNotificationControls() {
         syncTgReportControls();
+        showModal("tgModal");
       }
 
       function syncTgReportControls() {
@@ -4487,7 +4460,7 @@
         };
         const r = await api("tg.set", { config });
         if (r.ok) {
-          closeTgModal();
+          hideModal('tgModal');
           toast("TG 配置已保存", "ok");
         } else toast("保存失败: " + r.error, "err");
       }
@@ -4578,10 +4551,14 @@
       function chartFont() {
         return { family: getComputedStyle(document.body).fontFamily || "sans-serif" };
       }
-      // 截断过长的客户端名称，避免图表标签溢出
-      function truncateClient(name, max = 42) {
+      // 客户端名称按词/字符换行，避免过长的标签溢出或截断
+      function wrapClientLabel(name, maxCharsPerLine = 24) {
         const s = String(name || "未知");
-        return s.length > max ? s.slice(0, max - 1) + "…" : s;
+        const lines = [];
+        for (let i = 0; i < s.length; i += maxCharsPerLine) {
+          lines.push(s.slice(i, i + maxCharsPerLine));
+        }
+        return lines;
       }
 
       async function loadCharts() {
@@ -4860,7 +4837,7 @@
           {
             type: "bar",
             data: {
-              labels: clientEntries.map((e) => truncateClient(e[0])),
+              labels: clientEntries.map((e) => e[0]),
               datasets: [
                 {
                   label: "播放次数",
@@ -4873,10 +4850,19 @@
               indexAxis: "y",
               responsive: true,
               maintainAspectRatio: false,
+              layout: { padding: { left: 4, right: 4 } },
               plugins: { legend: { display: false } },
               scales: {
                 x: { beginAtZero: true, ticks: chartFont() },
-                y: { ticks: chartFont() },
+                y: {
+                  ticks: {
+                    ...chartFont(),
+                    callback: function (value) {
+                      const label = this.getLabelForValue(value);
+                      return wrapClientLabel(label);
+                    },
+                  },
+                },
               },
             },
           }
@@ -5073,13 +5059,6 @@
         const m = raw.match(/^(\S+)\s+(\[[A-Z]+\])\s?([\s\S]*)$/);
         if (!m) return `<span class="log-msg">${esc(raw)}</span>`;
         return `<span class="log-time">${esc(m[1])}</span><span class="log-badge">${esc(m[2])}</span><span class="log-msg">${esc(m[3])}</span>`;
-      }
-
-      function safeLogLevel(level) {
-        const value = String(level || "info").toLowerCase();
-        return ["debug", "info", "warn", "error"].includes(value)
-          ? value
-          : "info";
       }
 
       function logEntryId(entry) {
