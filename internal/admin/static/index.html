@@ -4561,6 +4561,22 @@
         return lines;
       }
 
+      // 客户端名称精简：浏览器 UA 保留到首个括号组(系统信息)，
+      // Emby 类客户端只保留 "名称/版本"，去掉冗长参数
+      function shortClientName(name) {
+        const s = String(name || "未知").trim();
+        if (!s) return "未知";
+        // Emby 类: "Hills Windows/0.3.0 (windows; ...)" -> "Hills Windows/0.3.0"
+        const appVer = s.match(/^([A-Za-z]+ [^(]+\/[^\s(]+)/);
+        if (appVer) return appVer[1];
+        // 浏览器 UA: "Mozilla/5.0 (Windows NT 10.0; ...)" -> 保留到首个括号组
+        const ua = s.match(/^(.*?\([^)]*\))/);
+        if (ua) return ua[1];
+        // 其余: 截到首个空格
+        const sp = s.indexOf(" ");
+        return sp > 0 ? s.slice(0, sp) : s;
+      }
+
       async function loadCharts() {
         const days = parseInt(
           document.getElementById("chartsDays")?.value || "7"
@@ -4821,6 +4837,8 @@
         );
 
         // 4) 客户端播放排行（横向柱状）
+        // 按原始 client 聚合（相同精简名的不同参数会归并到一起），
+        // 展示时仅显示精简名，tooltip 显示完整原始名称
         const clientMap = new Map();
         for (const s of stats) {
           clientMap.set(
@@ -4831,13 +4849,16 @@
         const clientEntries = [...clientMap.entries()]
           .sort((a, b) => a[1] - b[1])
           .slice(-10);
+        const fullClientName = new Map(
+          clientEntries.map((e) => [shortClientName(e[0]), e[0]])
+        );
         renderChart(
           "chartByClient",
           document.getElementById("chartByClient"),
           {
             type: "bar",
             data: {
-              labels: clientEntries.map((e) => e[0]),
+              labels: clientEntries.map((e) => shortClientName(e[0])),
               datasets: [
                 {
                   label: "播放次数",
@@ -4851,7 +4872,17 @@
               responsive: true,
               maintainAspectRatio: false,
               layout: { padding: { left: 4, right: 4 } },
-              plugins: { legend: { display: false } },
+              plugins: {
+                legend: { display: false },
+                tooltip: {
+                  callbacks: {
+                    title: (items) => {
+                      const t = items[0]?.label || "";
+                      return fullClientName.get(t) || t;
+                    },
+                  },
+                },
+              },
               scales: {
                 x: { beginAtZero: true, ticks: chartFont() },
                 y: {
