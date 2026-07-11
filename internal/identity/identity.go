@@ -65,9 +65,9 @@ var Profiles = map[string]Profile{
 		Label:          "Yamby Android",
 		ClientName:     "Yamby",
 		ClientVersion:  "2.0.4.6",
-		DeviceName:     "Xiaomi-23046RP50C",
+		DeviceName:     "Android",
 		DeviceIDFormat: "uuid",
-		UserAgent:      "Yamby/2.0.4.6 (Android)",
+		UserAgent:      "Yamby/2.0.4.6(Android",
 	},
 	"hills_android": {
 		Key:            "hills_android",
@@ -76,15 +76,15 @@ var Profiles = map[string]Profile{
 		ClientVersion:  "1.7.2",
 		DeviceName:     "Xiaomi-23046RP50C",
 		DeviceIDLength: 16,
-		UserAgent:      "Hills/1.7.2 (android; 16)",
+		UserAgent:      "Hills/1.7.2 (android; 15)",
 	},
 	"hills_windows": {
 		Key:            "hills_windows",
 		Label:          "Hills Windows",
 		ClientName:     "Hills Windows",
-		ClientVersion:  "1.2.4",
+		ClientVersion:  "1.3.1",
 		DeviceIDLength: 32,
-		UserAgent:      "Hills Windows/1.2.4 (windows; 19041.vb_release.191206-1406)",
+		UserAgent:      "Hills Windows/1.3.1 (windows; 19041.vb_release.191206-1406)",
 	},
 }
 
@@ -93,6 +93,7 @@ var ProfileOrder = []string{DefaultProfile, "hills_android", "hills_windows"}
 var (
 	embyAuthorizationRE      = regexp.MustCompile(`(?i)^(?:MediaBrowser|Emby)(?:\s|$)`)
 	embyAuthorizationTokenRE = regexp.MustCompile(`(?i)^(?:MediaBrowser|Emby)(?:\s|$).*?\bToken\s*=\s*("[^"]*"|[^,\s]+)`)
+	authorizationHeaderKeys  = []string{"X-Emby-Authorization", "X-MediaBrowser-Authorization", "Authorization", "X-Authorization"}
 )
 
 func NewManager(store *storage.Store) *Manager {
@@ -113,10 +114,14 @@ func (m *Manager) Init(ctx context.Context) error {
 	return nil
 }
 
-func (m *Manager) Snapshot(profile string, deviceNameOverride string) Snapshot {
+func (m *Manager) Snapshot(profile string, deviceNameOverride ...string) Snapshot {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.ensureLocked()
+	return m.snapshotLocked(profile, deviceNameOverride...)
+}
+
+func (m *Manager) snapshotLocked(profile string, deviceNameOverride ...string) Snapshot {
 	selected := GetProfile(profile)
 	state := m.deviceStateLocked(selected.Key)
 	shortID := state.DeviceID
@@ -124,8 +129,8 @@ func (m *Manager) Snapshot(profile string, deviceNameOverride string) Snapshot {
 		shortID = shortID[:8]
 	}
 	deviceName := state.DeviceName
-	if deviceNameOverride != "" {
-		deviceName = deviceNameOverride
+	if len(deviceNameOverride) > 0 && strings.TrimSpace(deviceNameOverride[0]) != "" {
+		deviceName = strings.TrimSpace(deviceNameOverride[0])
 	}
 	return Snapshot{
 		Profile:       selected.Key,
@@ -139,89 +144,258 @@ func (m *Manager) Snapshot(profile string, deviceNameOverride string) Snapshot {
 	}
 }
 
-func (m *Manager) ApplyToHeaders(headers http.Header, profile string, deviceNameOverride string) {
-	snap := m.Snapshot(profile, deviceNameOverride)
-	applyAuthorizationTokenToHeaders(headers)
-	dropIdentityHeaders := usesYambyAuthFormat(snap)
-	for key, values := range cloneHeader(headers) {
-		if len(values) == 0 {
-			continue
-		}
-		value := values[0]
-		switch normalizeHeaderKey(key) {
-		case "xembyclient", "xmediabrowserclient":
-			setOrDropIdentityHeader(headers, key, snap.ClientName, dropIdentityHeaders)
-		case "xembyclientversion", "xmediabrowserclientversion":
-			setOrDropIdentityHeader(headers, key, snap.ClientVersion, dropIdentityHeaders)
-		case "xembydevicename", "xmediabrowserdevicename":
-			setOrDropIdentityHeader(headers, key, snap.DeviceName, dropIdentityHeaders)
-		case "xembydeviceid", "xmediabrowserdeviceid":
-			setOrDropIdentityHeader(headers, key, snap.DeviceID, dropIdentityHeaders)
-		case "xembyauthorization", "xmediabrowserauthorization", "xauthorization":
-			headers.Set(key, RewriteMediaBrowserAuthorization(value, snap))
-		case "xapplication":
-			headers.Set(key, snap.ClientName+"/"+snap.ClientVersion)
-		}
-	}
-	for _, key := range []string{"X-Emby-Authorization", "X-MediaBrowser-Authorization", "Authorization"} {
-		value := headers.Get(key)
-		if value != "" && isEmbyAuthorization(value) {
-			headers.Set(key, RewriteMediaBrowserAuthorization(value, snap))
-		}
-	}
+func (m *Manager) ApplyToHeaders(headers http.Header, profile string, deviceNameOverride ...string) {
+	snap := m.Snapshot(profile, deviceNameOverride...)
+	applyProfileIdentityToHeaders(headers, snap)
 }
 
-// setOrDropIdentityHeader rewrites a standalone client/device identity header,
-// or drops it when drop is set. For yamby upstreams these headers are redundant
-// (the values already live in the Emby authorization string) and are dropped
-// instead of forwarded.
-func setOrDropIdentityHeader(headers http.Header, key, value string, drop bool) {
-	if drop {
-		headers.Del(key)
+func applyProfileIdentityToHeaders(headers http.Header, snap Snapshot) {
+	if headers == nil {
 		return
 	}
-	headers.Set(key, value)
+	token := identityTokenFromHeaders(headers)
+	auth := firstEmbyAuthorizationHeader(headers)
+	stripImpersonationHeaders(headers)
+	switch {
+	case usesHillsAuthFormat(snap):
+		headers.Set("X-Emby-Authorization", buildHillsAuthorization(snap))
+	case auth != "":
+		headers.Set("X-Emby-Authorization", buildYambyAuthorization(auth, snap))
+	}
+	if token != "" {
+		headers.Set("X-Emby-Token", token)
+	}
 }
 
-func (m *Manager) ApplyToURL(u *url.URL, headers http.Header, profile string, deviceNameOverride string) {
+func stripImpersonationHeaders(headers http.Header) {
+	for key := range cloneHeader(headers) {
+		normalized := normalizeHeaderKey(key)
+		switch {
+		case normalized == "xembytoken":
+			if !strings.EqualFold(key, "X-Emby-Token") {
+				deleteHeaderKey(headers, key)
+			}
+			continue
+		case normalized == "xembyauthorization":
+			deleteHeaderKey(headers, key)
+		case isStandaloneIdentityHeader(normalized):
+			deleteHeaderKey(headers, key)
+		case strings.HasPrefix(normalized, "xmediabrowser"):
+			deleteHeaderKey(headers, key)
+		case normalized == "xauthorization":
+			deleteHeaderKey(headers, key)
+		case normalized == "authorization" && isEmbyAuthorization(headers.Get(key)):
+			deleteHeaderKey(headers, key)
+		}
+	}
+}
+
+func isStandaloneIdentityHeader(normalizedKey string) bool {
+	switch normalizedKey {
+	case "xembyclient", "xembyclientversion", "xembydevicename", "xembydeviceid", "xembylanguage", "xapplication":
+		return true
+	default:
+		return false
+	}
+}
+
+func deleteHeaderKey(headers http.Header, key string) {
+	delete(headers, key)
+	headers.Del(key)
+}
+
+func (m *Manager) ApplyToURL(u *url.URL, headers http.Header, profile string, deviceNameOverride ...string) {
 	if u == nil {
 		return
 	}
-	snap := m.Snapshot(profile, deviceNameOverride)
+	snap := m.Snapshot(profile, deviceNameOverride...)
 	if usesYambyAuthFormat(snap) {
 		applyYambyQueryAuthToHeaders(u, headers)
-		applyAuthorizationTokenToHeaders(headers)
+		setTokenHeaderIfMissing(headers, authTokenFromHeaders(headers))
 		return
 	}
-	applyQueryAuthorizationTokenToHeaders(u, headers)
+	if usesHillsAuthFormat(snap) {
+		applyHillsQueryIdentityToURL(u, headers, snap)
+		return
+	}
+	setTokenHeaderIfMissing(headers, authTokenFromURL(u))
 	applyProfileIdentityToURL(u, snap)
 }
 
-func applyQueryAuthorizationTokenToHeaders(u *url.URL, headers http.Header) {
-	if u == nil || headers == nil || headersHaveNonEmptyValue(headers, "X-Emby-Token") {
+func (m *Manager) ApplyToResourceURL(u *url.URL, headers http.Header, profile string, deviceNameOverride ...string) {
+	if u == nil {
 		return
 	}
+	snap := m.Snapshot(profile, deviceNameOverride...)
+	if usesYambyAuthFormat(snap) {
+		applyYambyQueryAuthToHeaders(u, headers)
+		setTokenHeaderIfMissing(headers, authTokenFromHeaders(headers))
+		return
+	}
+	if usesHillsAuthFormat(snap) {
+		applyHillsResourceIdentityToURL(u, headers, snap)
+		return
+	}
+	setTokenHeaderIfMissing(headers, authTokenFromURL(u))
+	applyProfileIdentityToURL(u, snap)
+}
+
+func (m *Manager) ApplyToDirectURL(u *url.URL, headers http.Header, profile string, deviceNameOverride ...string) {
+	snap := m.Snapshot(profile, deviceNameOverride...)
+	setTokenHeaderIfMissing(headers, firstSanitizedToken(
+		firstQueryValueByNormalizedKey(u, "xembytoken"),
+		firstQueryValueByNormalizedKey(u, "xmediabrowsertoken"),
+		authTokenFromURL(u),
+	))
+	applyProfileIdentityToHeaders(headers, snap)
+}
+
+func setTokenHeaderIfMissing(headers http.Header, token string) {
+	if headers == nil || headersHaveNonEmptyValue(headers, "X-Emby-Token") || strings.TrimSpace(token) == "" {
+		return
+	}
+	headers.Set("X-Emby-Token", sanitizeHeaderValue(token))
+}
+
+func applyHillsQueryIdentityToURL(u *url.URL, headers http.Header, snap Snapshot) {
+	q := u.Query()
+	token := hillsTokenForURL(u, headers)
+	removeHillsQueryIdentity(q)
+	q.Set("X-Emby-Authorization", buildHillsAuthorization(snap))
+	q.Set("X-Emby-Client", snap.ClientName)
+	q.Set("X-Emby-Device-Name", snap.DeviceName)
+	q.Set("X-Emby-Device-Id", snap.DeviceID)
+	q.Set("X-Emby-Client-Version", snap.ClientVersion)
+	q.Set("X-Emby-Language", hillsLanguageForURL(u))
+	if token != "" {
+		q.Set("X-Emby-Token", token)
+		if headers != nil {
+			headers.Set("X-Emby-Token", sanitizeHeaderValue(token))
+		}
+	}
+	u.RawQuery = q.Encode()
+}
+
+func hillsLanguageForURL(u *url.URL) string {
+	if isUsersRootPath(u) {
+		return "en-us"
+	}
+	return "zh-cn"
+}
+
+func isUsersRootPath(u *url.URL) bool {
+	if u == nil {
+		return false
+	}
+	parts := strings.Split(strings.Trim(u.Path, "/"), "/")
+	for i, part := range parts {
+		if strings.EqualFold(part, "users") {
+			return i+2 == len(parts) && strings.TrimSpace(parts[i+1]) != ""
+		}
+	}
+	return false
+}
+
+func applyHillsResourceIdentityToURL(u *url.URL, headers http.Header, snap Snapshot) {
+	token := hillsTokenForURL(u, headers)
+	q := u.Query()
+	if removeHillsQueryIdentity(q) {
+		u.RawQuery = q.Encode()
+	}
+	setTokenHeaderIfMissing(headers, token)
+	applyProfileIdentityToHeaders(headers, snap)
+}
+
+func removeHillsQueryIdentity(q url.Values) bool {
+	changed := false
+	for key, values := range q {
+		if isHillsQueryIdentityParam(normalizeHeaderKey(key), values) {
+			q.Del(key)
+			changed = true
+		}
+	}
+	return changed
+}
+
+func hillsTokenForURL(u *url.URL, headers http.Header) string {
+	return firstSanitizedToken(
+		firstHeaderValue(headers, "X-Emby-Token"),
+		firstHeaderValue(headers, "X-MediaBrowser-Token"),
+		firstHeaderValueByNormalizedKey(headers, "xembytoken"),
+		firstHeaderValueByNormalizedKey(headers, "xmediabrowsertoken"),
+		firstQueryValueByNormalizedKey(u, "xembytoken"),
+		firstQueryValueByNormalizedKey(u, "xmediabrowsertoken"),
+		authTokenFromURL(u),
+		authTokenFromHeaders(headers),
+	)
+}
+
+func firstSanitizedToken(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return sanitizeHeaderValue(value)
+		}
+	}
+	return ""
+}
+
+func firstQueryValueByNormalizedKey(u *url.URL, normalizedKey string) string {
+	if u == nil {
+		return ""
+	}
 	for key, values := range u.Query() {
-		switch normalizeHeaderKey(key) {
-		case "authorization", "xauthorization", "xembyauthorization", "xmediabrowserauthorization":
-		default:
+		if normalizeHeaderKey(key) != normalizedKey {
+			continue
+		}
+		for _, value := range values {
+			if strings.TrimSpace(value) != "" {
+				return value
+			}
+		}
+	}
+	return ""
+}
+
+func authTokenFromURL(u *url.URL) string {
+	if u == nil {
+		return ""
+	}
+	for key, values := range u.Query() {
+		if !isAuthorizationKey(normalizeHeaderKey(key)) {
 			continue
 		}
 		for _, value := range values {
 			if token := authTokenFromValue(value); token != "" {
-				headers.Set("X-Emby-Token", sanitizeHeaderValue(token))
-				return
+				return token
 			}
 		}
 	}
+	return ""
 }
 
-func applyAuthorizationTokenToHeaders(headers http.Header) {
-	if headers == nil || headersHaveNonEmptyValue(headers, "X-Emby-Token") {
-		return
+func isAuthorizationKey(normalizedKey string) bool {
+	switch normalizedKey {
+	case "authorization", "xauthorization", "xembyauthorization", "xmediabrowserauthorization":
+		return true
+	default:
+		return false
 	}
-	if token := authTokenFromHeaders(headers); token != "" {
-		headers.Set("X-Emby-Token", token)
+}
+
+func isHillsQueryIdentityParam(normalizedKey string, values []string) bool {
+	if strings.HasPrefix(normalizedKey, "xemby") || strings.HasPrefix(normalizedKey, "xmediabrowser") {
+		return true
+	}
+	switch normalizedKey {
+	case "authorization", "xauthorization":
+		for _, value := range values {
+			if isEmbyAuthorization(value) {
+				return true
+			}
+		}
+		return false
+	default:
+		return false
 	}
 }
 
@@ -315,19 +489,6 @@ func isYambyQueryIdentityKey(normalizedKey string) bool {
 	}
 }
 
-func headersHaveNonEmptyValue(headers http.Header, canonical string) bool {
-	for key := range headers {
-		if strings.EqualFold(key, canonical) {
-			for _, value := range headers[key] {
-				if strings.TrimSpace(value) != "" {
-					return true
-				}
-			}
-		}
-	}
-	return false
-}
-
 // sanitizeHeaderValue strips control characters (CR/LF and other bytes below
 // space, plus the lone DEL) that net/http rejects when sending a request.
 // Values promoted from URL query parameters are untrusted input, so removing
@@ -410,7 +571,7 @@ func ProfileKeys() []string {
 }
 
 func (m *Manager) persistedLocked() persisted {
-	current := m.SnapshotLocked(DefaultProfile)
+	current := m.snapshotLocked(DefaultProfile)
 	profiles := map[string]deviceState{}
 	for key := range Profiles {
 		profiles[key] = m.deviceStateLocked(key)
@@ -420,25 +581,6 @@ func (m *Manager) persistedLocked() persisted {
 		ClientVersion: current.ClientVersion,
 		UserAgent:     current.UserAgent,
 		Profiles:      profiles,
-	}
-}
-
-func (m *Manager) SnapshotLocked(profile string) Snapshot {
-	selected := GetProfile(profile)
-	state := m.deviceStateLocked(selected.Key)
-	shortID := state.DeviceID
-	if len(shortID) > 8 {
-		shortID = shortID[:8]
-	}
-	return Snapshot{
-		Profile:       selected.Key,
-		Label:         selected.Label,
-		ClientName:    selected.ClientName,
-		ClientVersion: selected.ClientVersion,
-		DeviceName:    state.DeviceName,
-		DeviceID:      state.DeviceID,
-		ShortID:       shortID,
-		UserAgent:     selected.UserAgent,
 	}
 }
 
@@ -588,6 +730,11 @@ func usesYambyAuthFormat(snap Snapshot) bool {
 	return profile == DefaultProfile
 }
 
+func usesHillsAuthFormat(snap Snapshot) bool {
+	profile := NormalizeProfile(snap.Profile)
+	return profile == "hills_android" || profile == "hills_windows"
+}
+
 func buildYambyAuthorization(_ string, snap Snapshot) string {
 	parts := []string{
 		"Client=" + snap.ClientName,
@@ -617,9 +764,49 @@ func authTokenFromValue(auth string) string {
 }
 
 func authTokenFromHeaders(headers http.Header) string {
-	for _, key := range []string{"X-Emby-Authorization", "X-MediaBrowser-Authorization", "Authorization", "X-Authorization"} {
-		if token := authTokenFromValue(headers.Get(key)); token != "" {
+	for _, key := range authorizationHeaderKeys {
+		if token := authTokenFromValue(firstHeaderValue(headers, key)); token != "" {
 			return token
+		}
+	}
+	for key, values := range headers {
+		if !isAuthorizationKey(normalizeHeaderKey(key)) {
+			continue
+		}
+		for _, value := range values {
+			if token := authTokenFromValue(value); token != "" {
+				return token
+			}
+		}
+	}
+	return ""
+}
+
+func identityTokenFromHeaders(headers http.Header) string {
+	return firstSanitizedToken(
+		firstHeaderValue(headers, "X-Emby-Token"),
+		firstHeaderValue(headers, "X-MediaBrowser-Token"),
+		firstHeaderValueByNormalizedKey(headers, "xembytoken"),
+		firstHeaderValueByNormalizedKey(headers, "xmediabrowsertoken"),
+		authTokenFromHeaders(headers),
+	)
+}
+
+func firstEmbyAuthorizationHeader(headers http.Header) string {
+	for _, key := range authorizationHeaderKeys {
+		value := firstHeaderValue(headers, key)
+		if isEmbyAuthorization(value) {
+			return value
+		}
+	}
+	for key, values := range headers {
+		if !isAuthorizationKey(normalizeHeaderKey(key)) {
+			continue
+		}
+		for _, value := range values {
+			if isEmbyAuthorization(value) {
+				return value
+			}
 		}
 	}
 	return ""
@@ -633,6 +820,44 @@ func unquoteAuthFieldValue(value string) string {
 		value = strings.ReplaceAll(value, `\\`, `\`)
 	}
 	return value
+}
+
+func firstHeaderValue(headers http.Header, canonical string) string {
+	if headers == nil {
+		return ""
+	}
+	for key, values := range headers {
+		if !strings.EqualFold(key, canonical) {
+			continue
+		}
+		for _, value := range values {
+			if strings.TrimSpace(value) != "" {
+				return value
+			}
+		}
+	}
+	return ""
+}
+
+func firstHeaderValueByNormalizedKey(headers http.Header, normalizedKey string) string {
+	if headers == nil {
+		return ""
+	}
+	for key, values := range headers {
+		if normalizeHeaderKey(key) != normalizedKey {
+			continue
+		}
+		for _, value := range values {
+			if strings.TrimSpace(value) != "" {
+				return value
+			}
+		}
+	}
+	return ""
+}
+
+func headersHaveNonEmptyValue(headers http.Header, canonical string) bool {
+	return firstHeaderValue(headers, canonical) != ""
 }
 
 func normalizeHeaderKey(value string) string {
