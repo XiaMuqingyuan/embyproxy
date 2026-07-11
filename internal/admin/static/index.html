@@ -2383,11 +2383,11 @@
             <button class="rail-button" onclick="switchTab('stats', this)">
               统计
             </button>
-            <button class="rail-button" onclick="switchTab('logs', this)">
-              日志
-            </button>
             <button class="rail-button" onclick="switchTab('charts', this)">
               可视化
+            </button>
+            <button class="rail-button" onclick="switchTab('logs', this)">
+              日志
             </button>
           </nav>
           <div class="rail-bottom">
@@ -4637,9 +4637,8 @@
         const daysSorted = [...dayMap.keys()].sort();
         const trendPlays = daysSorted.map((d) => dayMap.get(d).plays);
         const trendSessions = daysSorted.map((d) => dayMap.get(d).sessions);
-        const trendTraffic = daysSorted.map((d) =>
-          dayMap.get(d).inbound + dayMap.get(d).outbound
-        );
+        const trendInbound = daysSorted.map((d) => dayMap.get(d).inbound);
+        const trendOutbound = daysSorted.map((d) => dayMap.get(d).outbound);
 
         renderChart(
           "chartTrend",
@@ -4652,8 +4651,8 @@
                 {
                   label: "播放次数",
                   data: trendPlays,
-                  borderColor: chartPalette[0],
-                  backgroundColor: "rgba(36,89,77,0.12)",
+                  borderColor: "#315f8f",
+                  backgroundColor: "rgba(49,95,143,0.12)",
                   yAxisID: "y",
                   tension: 0.3,
                   fill: true,
@@ -4668,10 +4667,19 @@
                   fill: false,
                 },
                 {
-                  label: "流量",
-                  data: trendTraffic,
-                  borderColor: chartPalette[2],
+                  label: "入站",
+                  data: trendInbound,
+                  borderColor: "#237547",
                   backgroundColor: "rgba(35,117,71,0.10)",
+                  yAxisID: "y1",
+                  tension: 0.3,
+                  fill: false,
+                },
+                {
+                  label: "出站",
+                  data: trendOutbound,
+                  borderColor: "#a83b32",
+                  backgroundColor: "rgba(168,59,50,0.10)",
                   yAxisID: "y1",
                   tension: 0.3,
                   fill: false,
@@ -4687,7 +4695,7 @@
                 tooltip: {
                   callbacks: {
                     label: (c) =>
-                      c.dataset.label === "流量"
+                      c.dataset.label === "入站" || c.dataset.label === "出站"
                         ? `${c.dataset.label}: ${formatBytes(c.parsed.y)}`
                         : `${c.dataset.label}: ${c.parsed.y}`,
                   },
@@ -4706,7 +4714,7 @@
                   position: "right",
                   beginAtZero: true,
                   grid: { drawOnChartArea: false },
-                  title: { display: true, text: "流量", ...chartFont() },
+                  title: { display: true, text: "入站 / 出站", ...chartFont() },
                   ticks: {
                     ...chartFont(),
                     callback: (v) => formatBytes(v),
@@ -4727,9 +4735,8 @@
           return `${mm}-${dd} ${hh}:00`;
         });
         const hourPlays = hourly.map((h) => Number(h.plays || 0));
-        const hourTraffic = hourly.map(
-          (h) => Number(h.inboundBytes || 0) + Number(h.outboundBytes || 0)
-        );
+        const hourInbound = hourly.map((h) => Number(h.inboundBytes || 0));
+        const hourOutbound = hourly.map((h) => Number(h.outboundBytes || 0));
         renderChart(
           "chartHourly",
           document.getElementById("chartHourly"),
@@ -4739,18 +4746,24 @@
               labels: hourLabels,
               datasets: [
                 {
-                  label: "播放次数",
-                  data: hourPlays,
-                  backgroundColor: "rgba(36,89,77,0.55)",
-                  yAxisID: "y",
+                  label: "入站",
+                  data: hourInbound,
+                  backgroundColor: "rgba(35,117,71,0.55)",
+                  yAxisID: "y1",
                 },
                 {
-                  label: "流量",
-                  data: hourTraffic,
-                  type: "line",
-                  borderColor: chartPalette[3],
-                  backgroundColor: "rgba(49,95,143,0.10)",
+                  label: "出站",
+                  data: hourOutbound,
+                  backgroundColor: "rgba(168,59,50,0.55)",
                   yAxisID: "y1",
+                },
+                {
+                  label: "播放次数",
+                  data: hourPlays,
+                  type: "line",
+                  borderColor: "#315f8f",
+                  backgroundColor: "rgba(49,95,143,0.10)",
+                  yAxisID: "y",
                   tension: 0.3,
                   fill: false,
                 },
@@ -4765,7 +4778,7 @@
                 tooltip: {
                   callbacks: {
                     label: (c) =>
-                      c.dataset.label === "流量"
+                      c.dataset.label === "入站" || c.dataset.label === "出站"
                         ? `${c.dataset.label}: ${formatBytes(c.parsed.y)}`
                         : `${c.dataset.label}: ${c.parsed.y}`,
                   },
@@ -4784,7 +4797,7 @@
                   position: "right",
                   beginAtZero: true,
                   grid: { drawOnChartArea: false },
-                  title: { display: true, text: "流量", ...chartFont() },
+                  title: { display: true, text: "入站 / 出站", ...chartFont() },
                   ticks: { ...chartFont(), callback: (v) => formatBytes(v) },
                 },
                 x: {
