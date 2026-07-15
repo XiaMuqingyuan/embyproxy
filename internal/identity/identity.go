@@ -76,7 +76,7 @@ var Profiles = map[string]Profile{
 		ClientVersion:  "1.7.2",
 		DeviceName:     "Xiaomi-23046RP50C",
 		DeviceIDLength: 16,
-		UserAgent:      "Hills/1.7.2 (android; 15)",
+		UserAgent:      "Hills/1.7.2 (android; 16)",
 	},
 	"hills_windows": {
 		Key:            "hills_windows",

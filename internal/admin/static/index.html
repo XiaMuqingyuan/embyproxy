@@ -4690,6 +4690,22 @@
               responsive: true,
               maintainAspectRatio: false,
               interaction: { mode: "index", intersect: false },
+              animation: {
+                duration: 800,
+                easing: "easeOutQuart",
+              },
+              transitions: {
+                show: {
+                  animations: {
+                    y: { from: 0 },
+                  },
+                },
+                hide: {
+                  animations: {
+                    y: { to: 0 },
+                  },
+                },
+              },
               plugins: {
                 legend: { labels: chartFont() },
                 tooltip: {
@@ -4773,6 +4789,22 @@
               responsive: true,
               maintainAspectRatio: false,
               interaction: { mode: "index", intersect: false },
+              animation: {
+                duration: 800,
+                easing: "easeOutQuart",
+              },
+              transitions: {
+                show: {
+                  animations: {
+                    y: { from: 0 },
+                  },
+                },
+                hide: {
+                  animations: {
+                    y: { to: 0 },
+                  },
+                },
+              },
               plugins: {
                 legend: { labels: chartFont() },
                 tooltip: {
