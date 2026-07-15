@@ -250,7 +250,7 @@ func (s *Store) LogPlayback(ctx context.Context, in PlaybackInput) error {
 		if mode == "" {
 			mode = "proxy"
 		}
-		if err := upsertPlayBucket(ctx, tx, now, nodeName, client, mode, playInc, 0, 0, 0, sessInc, errInc); err != nil {
+		if err := upsertPlayBucket(ctx, tx, now, nodeName, client, mode, playInc, 0, 0, 0, sessInc, errInc, 0); err != nil {
 			return err
 		}
 	}
@@ -266,6 +266,51 @@ func (s *Store) LogPlayback(ctx context.Context, in PlaybackInput) error {
 				updated_at = MAX(proxy_kv.updated_at, excluded.updated_at)
 		`, key, strconv.FormatInt(playInc, 10), now); err != nil {
 			return err
+		}
+	}
+
+	// 播放时长：仅对 Stopped 事件累计 PositionTicks（已观看到的位置）。
+	// 用 PlaySessionId + ItemId + PositionTicks 在 15 分钟内去重，规避客户端重试导致的重复累计。
+	if sessionEvent == "stopped" {
+		if durationMs := parsePositionTicks(bodyValues); durationMs > 0 {
+			stopKey := strings.Join([]string{
+				day, nodeName, client, ip, userID, deviceID, sessionID, playSessionID,
+				playbackStartMediaKey(reqURL, bodyValues), strconv.FormatInt(durationMs, 10),
+			}, "|")
+			var lastStopTS int64
+			stopErr := tx.QueryRowContext(ctx, `SELECT last_ts FROM play_stop_events WHERE k = ?`, stopKey).Scan(&lastStopTS)
+			countStop := false
+			if stopErr == sql.ErrNoRows {
+				countStop = true
+			} else if stopErr == nil && now-lastStopTS >= 15*60*1000 {
+				countStop = true
+			} else if stopErr != nil {
+				return stopErr
+			}
+			if countStop {
+				if _, err := tx.ExecContext(ctx, `
+					INSERT INTO play_stop_events (k, day, last_ts) VALUES (?, ?, ?)
+					ON CONFLICT(k) DO UPDATE SET last_ts = excluded.last_ts
+				`, stopKey, day, now); err != nil {
+					return err
+				}
+				if _, err := tx.ExecContext(ctx, `
+					INSERT INTO play_stats (day, node, client, plays, bytes, inbound_bytes, outbound_bytes, sessions, errors, duration_ms, updated_at)
+					VALUES (?, ?, ?, 0, 0, 0, 0, 0, 0, ?, ?)
+					ON CONFLICT(day, node, client) DO UPDATE SET
+						duration_ms = duration_ms + excluded.duration_ms,
+						updated_at = MAX(play_stats.updated_at, excluded.updated_at)
+				`, day, nodeName, client, durationMs, now); err != nil {
+					return err
+				}
+				mode := in.Mode
+				if mode == "" {
+					mode = "proxy"
+				}
+				if err := upsertPlayBucket(ctx, tx, now, nodeName, client, mode, 0, 0, 0, 0, 0, 0, durationMs); err != nil {
+					return err
+				}
+			}
 		}
 	}
 	return tx.Commit()
@@ -320,7 +365,7 @@ func (s *Store) LogPlaybackTraffic(ctx context.Context, in PlaybackInput) error 
 	if err != nil {
 		return err
 	}
-	return upsertPlayBucket(ctx, s.db, now, nodeName, client, "proxy", 0, totalBytes, inboundBytes, outboundBytes, 0, 0)
+	return upsertPlayBucket(ctx, s.db, now, nodeName, client, "proxy", 0, totalBytes, inboundBytes, outboundBytes, 0, 0, 0)
 }
 
 func playbackOccurredAt(in PlaybackInput) int64 {
@@ -336,7 +381,7 @@ func (s *Store) GetPlayStats(ctx context.Context, days int) ([]PlayStat, error) 
 	}
 	cutoff := localtime.Now().AddDate(0, 0, -(days - 1)).Format("2006-01-02")
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT day, node, client, plays, bytes, inbound_bytes, outbound_bytes, sessions, errors
+		SELECT day, node, client, plays, bytes, inbound_bytes, outbound_bytes, sessions, errors, duration_ms
 		FROM play_stats WHERE day >= ? ORDER BY day DESC, plays DESC
 	`, cutoff)
 	if err != nil {
@@ -346,7 +391,7 @@ func (s *Store) GetPlayStats(ctx context.Context, days int) ([]PlayStat, error) 
 	out := []PlayStat{}
 	for rows.Next() {
 		var stat PlayStat
-		if err := rows.Scan(&stat.Day, &stat.Node, &stat.Client, &stat.Plays, &stat.Bytes, &stat.InboundBytes, &stat.OutboundBytes, &stat.Sessions, &stat.Errors); err != nil {
+		if err := rows.Scan(&stat.Day, &stat.Node, &stat.Client, &stat.Plays, &stat.Bytes, &stat.InboundBytes, &stat.OutboundBytes, &stat.Sessions, &stat.Errors, &stat.DurationMS); err != nil {
 			return nil, err
 		}
 		stat.Bytes = stat.InboundBytes + stat.OutboundBytes
@@ -371,7 +416,7 @@ func (s *Store) GetTodayStats(ctx context.Context) (TodayStats, error) {
 }
 
 func (s *Store) getStatsForDay(ctx context.Context, day string) ([]PlayStat, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT day, node, client, plays, bytes, inbound_bytes, outbound_bytes, sessions, errors FROM play_stats WHERE day = ?`, day)
+	rows, err := s.db.QueryContext(ctx, `SELECT day, node, client, plays, bytes, inbound_bytes, outbound_bytes, sessions, errors, duration_ms FROM play_stats WHERE day = ?`, day)
 	if err != nil {
 		return nil, err
 	}
@@ -379,7 +424,7 @@ func (s *Store) getStatsForDay(ctx context.Context, day string) ([]PlayStat, err
 	out := []PlayStat{}
 	for rows.Next() {
 		var stat PlayStat
-		if err := rows.Scan(&stat.Day, &stat.Node, &stat.Client, &stat.Plays, &stat.Bytes, &stat.InboundBytes, &stat.OutboundBytes, &stat.Sessions, &stat.Errors); err != nil {
+		if err := rows.Scan(&stat.Day, &stat.Node, &stat.Client, &stat.Plays, &stat.Bytes, &stat.InboundBytes, &stat.OutboundBytes, &stat.Sessions, &stat.Errors, &stat.DurationMS); err != nil {
 			return nil, err
 		}
 		stat.Bytes = stat.InboundBytes + stat.OutboundBytes
@@ -522,6 +567,33 @@ func parsePlaybackRequestBody(body []byte) map[string]any {
 	return out
 }
 
+// maxPlaybackDurationMS caps a single reported playback duration to avoid
+// storing absurd values from malformed PositionTicks (e.g. a resume offset sent
+// on a Stopped event). 24h is far beyond any realistic single watch session.
+const maxPlaybackDurationMS = 24 * 60 * 60 * 1000
+
+// parsePositionTicks extracts the watched duration in milliseconds from an
+// Emby playback event body. PositionTicks is expressed in 100-nanosecond units,
+// so duration_ms = PositionTicks / 10000. Returns 0 for missing/invalid values.
+func parsePositionTicks(body map[string]any) int64 {
+	raw := bodyValue(body, "PositionTicks", "positionTicks", "position_ticks")
+	if raw == "" {
+		return 0
+	}
+	ticks, err := strconv.ParseInt(strings.TrimSpace(raw), 10, 64)
+	if err != nil || ticks <= 0 {
+		return 0
+	}
+	ms := ticks / 10000
+	if ms < 0 {
+		return 0
+	}
+	if ms > maxPlaybackDurationMS {
+		return maxPlaybackDurationMS
+	}
+	return ms
+}
+
 func headerOrQueryOrBody(headers http.Header, u *url.URL, body map[string]any, names ...string) string {
 	if value := headerOrQuery(headers, u, names...); value != "" {
 		return value
@@ -618,7 +690,7 @@ func cutString(value string, max int) string {
 
 func (s *Store) GetRangeStats(ctx context.Context, startTime, endTime int64) ([]PlayStat, int64, int64, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT node, client, SUM(plays), SUM(bytes), SUM(inbound_bytes), SUM(outbound_bytes), SUM(sessions), SUM(errors)
+		SELECT node, client, SUM(plays), SUM(bytes), SUM(inbound_bytes), SUM(outbound_bytes), SUM(sessions), SUM(errors), SUM(duration_ms)
 		FROM play_buckets
 		WHERE bucket_start >= ? AND bucket_start < ?
 		GROUP BY node, client
@@ -631,7 +703,7 @@ func (s *Store) GetRangeStats(ctx context.Context, startTime, endTime int64) ([]
 	out := []PlayStat{}
 	for rows.Next() {
 		var stat PlayStat
-		if err := rows.Scan(&stat.Node, &stat.Client, &stat.Plays, &stat.Bytes, &stat.InboundBytes, &stat.OutboundBytes, &stat.Sessions, &stat.Errors); err != nil {
+		if err := rows.Scan(&stat.Node, &stat.Client, &stat.Plays, &stat.Bytes, &stat.InboundBytes, &stat.OutboundBytes, &stat.Sessions, &stat.Errors, &stat.DurationMS); err != nil {
 			return nil, 0, 0, err
 		}
 		stat.Bytes = stat.InboundBytes + stat.OutboundBytes
@@ -670,11 +742,11 @@ func (s *Store) PrunePlayBuckets(ctx context.Context, keepDays int) error {
 	return err
 }
 
-func upsertPlayBucket(ctx context.Context, exec sqlExecer, occurredAt int64, node, client, mode string, plays, bytes, inboundBytes, outboundBytes, sessions, errors int64) error {
+func upsertPlayBucket(ctx context.Context, exec sqlExecer, occurredAt int64, node, client, mode string, plays, bytes, inboundBytes, outboundBytes, sessions, errors, durationMs int64) error {
 	bucketStart := playbackBucketStart(occurredAt)
 	_, err := exec.ExecContext(ctx, `
-		INSERT INTO play_buckets (bucket_start, node, client, mode, plays, bytes, inbound_bytes, outbound_bytes, sessions, errors, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO play_buckets (bucket_start, node, client, mode, plays, bytes, inbound_bytes, outbound_bytes, sessions, errors, duration_ms, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(bucket_start, node, client, mode) DO UPDATE SET
 			plays = plays + excluded.plays,
 			bytes = bytes + excluded.bytes,
@@ -682,8 +754,9 @@ func upsertPlayBucket(ctx context.Context, exec sqlExecer, occurredAt int64, nod
 			outbound_bytes = outbound_bytes + excluded.outbound_bytes,
 			sessions = sessions + excluded.sessions,
 			errors = errors + excluded.errors,
+			duration_ms = duration_ms + excluded.duration_ms,
 			updated_at = MAX(play_buckets.updated_at, excluded.updated_at)
-	`, bucketStart, node, client, mode, plays, bytes, inboundBytes, outboundBytes, sessions, errors, occurredAt)
+	`, bucketStart, node, client, mode, plays, bytes, inboundBytes, outboundBytes, sessions, errors, durationMs, occurredAt)
 	return err
 }
 
@@ -706,7 +779,8 @@ func (s *Store) GetHourlyStats(ctx context.Context, hours int) ([]HourlyStat, er
 		SELECT
 			(bucket_start / 3600000) * 3600000 AS hour_start,
 			SUM(plays), SUM(sessions),
-			SUM(inbound_bytes), SUM(outbound_bytes), SUM(errors)
+			SUM(inbound_bytes), SUM(outbound_bytes), SUM(errors),
+			SUM(duration_ms)
 		FROM play_buckets
 		WHERE bucket_start >= ?
 		GROUP BY hour_start
@@ -719,7 +793,7 @@ func (s *Store) GetHourlyStats(ctx context.Context, hours int) ([]HourlyStat, er
 	out := []HourlyStat{}
 	for rows.Next() {
 		var h HourlyStat
-		if err := rows.Scan(&h.Hour, &h.Plays, &h.Sessions, &h.InboundBytes, &h.OutboundBytes, &h.Errors); err != nil {
+		if err := rows.Scan(&h.Hour, &h.Plays, &h.Sessions, &h.InboundBytes, &h.OutboundBytes, &h.Errors, &h.DurationMS); err != nil {
 			return nil, err
 		}
 		h.Bytes = h.InboundBytes + h.OutboundBytes

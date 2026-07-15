@@ -97,6 +97,7 @@ type PlayStat struct {
 	OutboundBytes int64  `json:"outboundBytes"`
 	Sessions      int64  `json:"sessions"`
 	Errors        int64  `json:"errors"`
+	DurationMS    int64  `json:"durationMs"`
 }
 
 type TodayStats struct {
@@ -112,6 +113,7 @@ type HourlyStat struct {
 	OutboundBytes int64 `json:"outboundBytes"`
 	Errors        int64 `json:"errors"`
 	Bytes         int64 `json:"bytes"`
+	DurationMS    int64 `json:"durationMs"`
 }
 
 type KeepaliveState struct {

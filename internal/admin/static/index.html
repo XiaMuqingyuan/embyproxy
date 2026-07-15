@@ -2526,6 +2526,7 @@
                       <th>客户端</th>
                       <th>播放次数</th>
                       <th>会话数</th>
+                      <th>时长</th>
                       <th>入站流量</th>
                       <th>出站流量</th>
                     </tr>
@@ -4496,7 +4497,8 @@
         let totalPlays = 0,
           totalSessions = 0,
           totalInboundBytes = 0,
-          totalOutboundBytes = 0;
+          totalOutboundBytes = 0,
+          totalDurationMs = 0;
         const nodeSet = new Set(),
           clientSet = new Set();
         for (const s of stats) {
@@ -4504,6 +4506,7 @@
           totalSessions += Number(s.sessions || 0);
           totalInboundBytes += trafficInboundBytes(s);
           totalOutboundBytes += trafficOutboundBytes(s);
+          totalDurationMs += Number(s.durationMs || 0);
           nodeSet.add(s.node);
           clientSet.add(s.client);
         }
@@ -4515,6 +4518,7 @@
         document.getElementById("statsCards").innerHTML = `
     <div class="stat-block"><div class="val">${totalPlays}</div><div class="lbl">总播放次数</div></div>
     <div class="stat-block"><div class="val">${totalSessions}</div><div class="lbl">总会话数</div></div>
+    <div class="stat-block"><div class="val">${formatDuration(totalDurationMs)}</div><div class="lbl">总播放时长</div></div>
     <div class="stat-block"><div class="val">${formatBytes(totalInboundBytes)}</div><div class="lbl">入站流量</div></div>
     <div class="stat-block"><div class="val">${formatBytes(totalOutboundBytes)}</div><div class="lbl">出站流量</div></div>
     <div class="stat-block"><div class="val">${nodeSet.size}</div><div class="lbl">活跃节点</div></div>
@@ -4525,11 +4529,11 @@
           ? stats
               .map(
                 (s) => `
-    <tr><td>${esc(s.day)}</td><td>${esc(s.node)}</td><td>${esc(s.client)}</td><td>${s.plays}</td><td>${s.sessions}</td><td>${formatBytes(trafficInboundBytes(s))}</td><td>${formatBytes(trafficOutboundBytes(s))}</td></tr>
+    <tr><td>${esc(s.day)}</td><td>${esc(s.node)}</td><td>${esc(s.client)}</td><td>${s.plays}</td><td>${s.sessions}</td><td>${formatDuration(Number(s.durationMs || 0))}</td><td>${formatBytes(trafficInboundBytes(s))}</td><td>${formatBytes(trafficOutboundBytes(s))}</td></tr>
   `,
               )
               .join("")
-          : '<tr><td class="table-empty" colspan="7">暂无数据</td></tr>';
+          : '<tr><td class="table-empty" colspan="8">暂无数据</td></tr>';
       }
 
       function trafficInboundBytes(stat) {
@@ -4622,23 +4626,25 @@
           }
         }
 
-        // 1) 按天趋势：按 day 聚合 plays / sessions / 流量
+        // 1) 按天趋势：按 day 聚合 plays / sessions / 流量 / 时长
         const dayMap = new Map();
         for (const s of stats) {
           const d = s.day;
           if (!dayMap.has(d))
-            dayMap.set(d, { plays: 0, sessions: 0, inbound: 0, outbound: 0 });
+            dayMap.set(d, { plays: 0, sessions: 0, inbound: 0, outbound: 0, duration: 0 });
           const row = dayMap.get(d);
           row.plays += Number(s.plays || 0);
           row.sessions += Number(s.sessions || 0);
           row.inbound += trafficInboundBytes(s);
           row.outbound += trafficOutboundBytes(s);
+          row.duration += Number(s.durationMs || 0);
         }
         const daysSorted = [...dayMap.keys()].sort();
         const trendPlays = daysSorted.map((d) => dayMap.get(d).plays);
         const trendSessions = daysSorted.map((d) => dayMap.get(d).sessions);
         const trendInbound = daysSorted.map((d) => dayMap.get(d).inbound);
         const trendOutbound = daysSorted.map((d) => dayMap.get(d).outbound);
+        const trendDuration = daysSorted.map((d) => dayMap.get(d).duration);
 
         renderChart(
           "chartTrend",
@@ -4684,6 +4690,15 @@
                   tension: 0.3,
                   fill: false,
                 },
+                {
+                  label: "播放时长",
+                  data: trendDuration,
+                  borderColor: "#6b4a7a",
+                  backgroundColor: "rgba(107,74,122,0.10)",
+                  yAxisID: "y2",
+                  tension: 0.3,
+                  fill: false,
+                },
               ],
             },
             options: {
@@ -4710,10 +4725,13 @@
                 legend: { labels: chartFont() },
                 tooltip: {
                   callbacks: {
-                    label: (c) =>
-                      c.dataset.label === "入站" || c.dataset.label === "出站"
-                        ? `${c.dataset.label}: ${formatBytes(c.parsed.y)}`
-                        : `${c.dataset.label}: ${c.parsed.y}`,
+                    label: (c) => {
+                      if (c.dataset.label === "入站" || c.dataset.label === "出站")
+                        return `${c.dataset.label}: ${formatBytes(c.parsed.y)}`;
+                      if (c.dataset.label === "播放时长")
+                        return `${c.dataset.label}: ${formatDuration(c.parsed.y)}`;
+                      return `${c.dataset.label}: ${c.parsed.y}`;
+                    },
                   },
                 },
               },
@@ -4736,6 +4754,17 @@
                     callback: (v) => formatBytes(v),
                   },
                 },
+                y2: {
+                  type: "linear",
+                  position: "right",
+                  beginAtZero: true,
+                  grid: { drawOnChartArea: false },
+                  title: { display: true, text: "播放时长", ...chartFont() },
+                  ticks: {
+                    ...chartFont(),
+                    callback: (v) => formatDuration(v),
+                  },
+                },
                 x: { ticks: chartFont() },
               },
             },
@@ -4753,6 +4782,7 @@
         const hourPlays = hourly.map((h) => Number(h.plays || 0));
         const hourInbound = hourly.map((h) => Number(h.inboundBytes || 0));
         const hourOutbound = hourly.map((h) => Number(h.outboundBytes || 0));
+        const hourDuration = hourly.map((h) => Number(h.durationMs || 0));
         renderChart(
           "chartHourly",
           document.getElementById("chartHourly"),
@@ -4783,6 +4813,16 @@
                   tension: 0.3,
                   fill: false,
                 },
+                {
+                  label: "播放时长",
+                  data: hourDuration,
+                  type: "line",
+                  borderColor: "#6b4a7a",
+                  backgroundColor: "rgba(107,74,122,0.10)",
+                  yAxisID: "y2",
+                  tension: 0.3,
+                  fill: false,
+                },
               ],
             },
             options: {
@@ -4809,10 +4849,13 @@
                 legend: { labels: chartFont() },
                 tooltip: {
                   callbacks: {
-                    label: (c) =>
-                      c.dataset.label === "入站" || c.dataset.label === "出站"
-                        ? `${c.dataset.label}: ${formatBytes(c.parsed.y)}`
-                        : `${c.dataset.label}: ${c.parsed.y}`,
+                    label: (c) => {
+                      if (c.dataset.label === "入站" || c.dataset.label === "出站")
+                        return `${c.dataset.label}: ${formatBytes(c.parsed.y)}`;
+                      if (c.dataset.label === "播放时长")
+                        return `${c.dataset.label}: ${formatDuration(c.parsed.y)}`;
+                      return `${c.dataset.label}: ${c.parsed.y}`;
+                    },
                   },
                 },
               },
@@ -4831,6 +4874,14 @@
                   grid: { drawOnChartArea: false },
                   title: { display: true, text: "入站 / 出站", ...chartFont() },
                   ticks: { ...chartFont(), callback: (v) => formatBytes(v) },
+                },
+                y2: {
+                  type: "linear",
+                  position: "right",
+                  beginAtZero: true,
+                  grid: { drawOnChartArea: false },
+                  title: { display: true, text: "播放时长", ...chartFont() },
+                  ticks: { ...chartFont(), callback: (v) => formatDuration(v) },
                 },
                 x: {
                   ticks: {
@@ -4953,6 +5004,20 @@
             },
           }
         );
+      }
+
+      function formatDuration(ms) {
+        let total = Math.max(0, Math.floor(Number(ms || 0) / 1000));
+        const d = Math.floor(total / 86400);
+        total -= d * 86400;
+        const h = Math.floor(total / 3600);
+        total -= h * 3600;
+        const m = Math.floor(total / 60);
+        const sec = total - m * 60;
+        if (d > 0) return `${d}天${h}时${m}分`;
+        if (h > 0) return `${h}时${m}分`;
+        if (m > 0) return `${m}分${sec}秒`;
+        return `${sec}秒`;
       }
 
       function formatBytes(bytes) {

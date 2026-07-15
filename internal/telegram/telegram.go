@@ -154,6 +154,7 @@ func buildReportText(period reportPeriod, today, yesterday summary, nodeDisplay 
 		fmt.Sprintf("▶ 播放 %d 次 · %d 会话 · %d 节点", today.Plays, today.Sessions, len(today.NodeMap)),
 	}
 	lines = append(lines, fmt.Sprintf("   入站 %s | 出站 %s", formatBytes(today.InboundBytes), formatBytes(today.OutboundBytes)))
+	lines = append(lines, fmt.Sprintf("   ⏱ 播放时长 %s", formatDuration(today.DurationMS)))
 	if today.Errors > 0 {
 		lines = append(lines, fmt.Sprintf("   ⚠️ 播放出错：%d 次", today.Errors))
 	}
@@ -190,6 +191,7 @@ func appendComparison(lines []string, current, previous summary, includeErrors b
 		current.Sessions == previous.Sessions &&
 		current.InboundBytes == previous.InboundBytes &&
 		current.OutboundBytes == previous.OutboundBytes &&
+		current.DurationMS == previous.DurationMS &&
 		(!includeErrors || current.Errors == previous.Errors) {
 		return append(lines, "📈 较前一日  无变化")
 	}
@@ -203,7 +205,8 @@ func appendComparison(lines []string, current, previous summary, includeErrors b
 		comparison,
 		fmt.Sprintf("   入站 %s | 出站 %s",
 			formatSignedBytes(current.InboundBytes-previous.InboundBytes),
-			formatSignedBytes(current.OutboundBytes-previous.OutboundBytes)))
+			formatSignedBytes(current.OutboundBytes-previous.OutboundBytes)),
+		fmt.Sprintf("   播放时长 %s", formatSignedDuration(current.DurationMS-previous.DurationMS)))
 }
 
 func formatReportRange(start, end time.Time) string {
@@ -314,6 +317,7 @@ type summary struct {
 	OutboundBytes int64
 	Sessions      int64
 	Errors        int64
+	DurationMS    int64
 	NodeMap       map[string]int64
 	ClientMap     map[string]int64
 }
@@ -326,6 +330,7 @@ func summarize(rows []storage.PlayStat) summary {
 		out.OutboundBytes += row.OutboundBytes
 		out.Sessions += row.Sessions
 		out.Errors += row.Errors
+		out.DurationMS += row.DurationMS
 		out.NodeMap[row.Node] += row.Plays
 		out.ClientMap[row.Client] += row.Plays
 	}
@@ -401,6 +406,40 @@ func formatSignedInt(value int64) string {
 		return "+" + strconv.FormatInt(value, 10)
 	}
 	return strconv.FormatInt(value, 10)
+}
+
+// formatDuration renders a millisecond duration as a compact Chinese string
+// (e.g. "1天2时3分", "4时5分", "12分30秒").
+func formatDuration(ms int64) string {
+	total := ms / 1000
+	d := total / 86400
+	total -= d * 86400
+	h := total / 3600
+	total -= h * 3600
+	m := total / 60
+	sec := total - m*60
+	if d > 0 {
+		return fmt.Sprintf("%d天%d时%d分", d, h, m)
+	}
+	if h > 0 {
+		return fmt.Sprintf("%d时%d分", h, m)
+	}
+	if m > 0 {
+		return fmt.Sprintf("%d分%d秒", m, sec)
+	}
+	return fmt.Sprintf("%d秒", sec)
+}
+
+func formatSignedDuration(value int64) string {
+	if value == 0 {
+		return "0"
+	}
+	prefix := "+"
+	if value < 0 {
+		prefix = "-"
+		value = -value
+	}
+	return prefix + formatDuration(value)
 }
 
 func formatPercent(part, total int64) string {

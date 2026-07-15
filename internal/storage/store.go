@@ -123,6 +123,11 @@ func (s *Store) InitSchema(ctx context.Context) error {
 			day TEXT NOT NULL,
 			last_ts INTEGER NOT NULL
 		);
+		CREATE TABLE IF NOT EXISTS play_stop_events (
+			k TEXT PRIMARY KEY,
+			day TEXT NOT NULL,
+			last_ts INTEGER NOT NULL
+		);
 		CREATE TABLE IF NOT EXISTS play_stats (
 			day TEXT NOT NULL,
 			node TEXT NOT NULL,
@@ -133,6 +138,7 @@ func (s *Store) InitSchema(ctx context.Context) error {
 			outbound_bytes INTEGER DEFAULT 0,
 			sessions INTEGER DEFAULT 0,
 			errors INTEGER DEFAULT 0,
+			duration_ms INTEGER DEFAULT 0,
 			updated_at INTEGER NOT NULL,
 			PRIMARY KEY(day, node, client)
 		);
@@ -147,6 +153,7 @@ func (s *Store) InitSchema(ctx context.Context) error {
 			outbound_bytes INTEGER DEFAULT 0,
 			sessions INTEGER DEFAULT 0,
 			errors INTEGER DEFAULT 0,
+			duration_ms INTEGER DEFAULT 0,
 			updated_at INTEGER NOT NULL,
 			PRIMARY KEY(bucket_start, node, client, mode)
 		);
@@ -154,7 +161,10 @@ func (s *Store) InitSchema(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	return s.ensurePlayStatsTrafficColumns(ctx)
+	if err := s.ensurePlayStatsTrafficColumns(ctx); err != nil {
+		return err
+	}
+	return s.ensureDurationColumns(ctx)
 }
 
 func (s *Store) ensurePlayStatsTrafficColumns(ctx context.Context) error {
@@ -170,6 +180,24 @@ func (s *Store) ensurePlayStatsTrafficColumns(ctx context.Context) error {
 	if !cols["outbound_bytes"] {
 		if _, err := s.db.ExecContext(ctx, `ALTER TABLE play_stats ADD COLUMN outbound_bytes INTEGER DEFAULT 0`); err != nil {
 			return err
+		}
+	}
+	return nil
+}
+
+// ensureDurationColumns adds the duration_ms column to the play_stats and
+// play_buckets tables for deployments created before playback duration tracking
+// was introduced.
+func (s *Store) ensureDurationColumns(ctx context.Context) error {
+	for _, table := range []string{"play_stats", "play_buckets"} {
+		cols, err := s.tableColumns(ctx, table)
+		if err != nil {
+			return err
+		}
+		if !cols["duration_ms"] {
+			if _, err := s.db.ExecContext(ctx, `ALTER TABLE `+table+` ADD COLUMN duration_ms INTEGER DEFAULT 0`); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
