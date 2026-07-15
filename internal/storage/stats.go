@@ -269,45 +269,25 @@ func (s *Store) LogPlayback(ctx context.Context, in PlaybackInput) error {
 		}
 	}
 
-	// 播放时长：仅对 Stopped 事件累计 PositionTicks（已观看到的位置）。
-	// 用 PlaySessionId + ItemId + PositionTicks 在 15 分钟内去重，规避客户端重试导致的重复累计。
-	if sessionEvent == "stopped" {
-		if durationMs := parsePositionTicks(bodyValues); durationMs > 0 {
-			stopKey := strings.Join([]string{
-				day, nodeName, client, ip, userID, deviceID, sessionID, playSessionID,
-				playbackStartMediaKey(reqURL, bodyValues), strconv.FormatInt(durationMs, 10),
-			}, "|")
-			var lastStopTS int64
-			stopErr := tx.QueryRowContext(ctx, `SELECT last_ts FROM play_stop_events WHERE k = ?`, stopKey).Scan(&lastStopTS)
-			countStop := false
-			if stopErr == sql.ErrNoRows {
-				countStop = true
-			} else if stopErr == nil && now-lastStopTS >= 15*60*1000 {
-				countStop = true
-			} else if stopErr != nil {
-				return stopErr
-			}
-			if countStop {
-				if _, err := tx.ExecContext(ctx, `
-					INSERT INTO play_stop_events (k, day, last_ts) VALUES (?, ?, ?)
-					ON CONFLICT(k) DO UPDATE SET last_ts = excluded.last_ts
-				`, stopKey, day, now); err != nil {
-					return err
-				}
+	// 播放时长：精确累加每次前进增量（playing/progress/stopped 均带 PositionTicks）。
+	// 重看计入；向后拖/暂停不计；向前跳跳过未看部分（逻辑见 updateWatchSession）。
+	if curTicks := parsePositionTicksRaw(bodyValues); curTicks > 0 {
+		if watchKey := playbackWatchKey(nodeName, client, playSessionID, sessionID, deviceID); watchKey != "" {
+			if inc := s.updateWatchSession(watchKey, curTicks, now); inc > 0 {
 				if _, err := tx.ExecContext(ctx, `
 					INSERT INTO play_stats (day, node, client, plays, bytes, inbound_bytes, outbound_bytes, sessions, errors, duration_ms, updated_at)
 					VALUES (?, ?, ?, 0, 0, 0, 0, 0, 0, ?, ?)
 					ON CONFLICT(day, node, client) DO UPDATE SET
 						duration_ms = duration_ms + excluded.duration_ms,
 						updated_at = MAX(play_stats.updated_at, excluded.updated_at)
-				`, day, nodeName, client, durationMs, now); err != nil {
+				`, day, nodeName, client, inc, now); err != nil {
 					return err
 				}
 				mode := in.Mode
 				if mode == "" {
 					mode = "proxy"
 				}
-				if err := upsertPlayBucket(ctx, tx, now, nodeName, client, mode, 0, 0, 0, 0, 0, 0, durationMs); err != nil {
+				if err := upsertPlayBucket(ctx, tx, now, nodeName, client, mode, 0, 0, 0, 0, 0, 0, inc); err != nil {
 					return err
 				}
 			}
@@ -567,15 +547,29 @@ func parsePlaybackRequestBody(body []byte) map[string]any {
 	return out
 }
 
-// maxPlaybackDurationMS caps a single reported playback duration to avoid
-// storing absurd values from malformed PositionTicks (e.g. a resume offset sent
-// on a Stopped event). 24h is far beyond any realistic single watch session.
-const maxPlaybackDurationMS = 24 * 60 * 60 * 1000
+// watchSeekCapFactor bounds how much "watched time" a single forward jump can
+// credit. A forward seek of +50min in a few seconds would otherwise be counted
+// as 50min watched; clamping to elapsed*cap credits at most the wall-clock gap
+// (the unseen middle is ignored). Normal playback and re-watches advance by
+// roughly the elapsed time, so they are credited in full.
+const watchSeekCapFactor = 3
 
-// parsePositionTicks extracts the watched duration in milliseconds from an
-// Emby playback event body. PositionTicks is expressed in 100-nanosecond units,
-// so duration_ms = PositionTicks / 10000. Returns 0 for missing/invalid values.
-func parsePositionTicks(body map[string]any) int64 {
+// watchSessionTTLMs drops a session's position tracker once it goes this long
+// without a new report, so the in-memory map cannot grow without bound.
+const watchSessionTTLMs = 24 * 60 * 60 * 1000
+
+// watchSession holds the last reported playback position for one client session
+// so the store can accumulate actual watched duration from forward deltas.
+type watchSession struct {
+	lastTS    int64
+	lastTicks int64
+	watchedMs int64
+}
+
+// parsePositionTicksRaw returns the raw PositionTicks from an Emby playback
+// event body (100-nanosecond units), or 0 for missing/invalid values. The raw
+// value is needed to compute deltas between consecutive progress reports.
+func parsePositionTicksRaw(body map[string]any) int64 {
 	raw := bodyValue(body, "PositionTicks", "positionTicks", "position_ticks")
 	if raw == "" {
 		return 0
@@ -584,14 +578,70 @@ func parsePositionTicks(body map[string]any) int64 {
 	if err != nil || ticks <= 0 {
 		return 0
 	}
-	ms := ticks / 10000
-	if ms < 0 {
+	return ticks
+}
+
+// playbackWatchKey identifies a playback session for duration tracking. It
+// prefers PlaySessionId, falling back to SessionId then DeviceId.
+func playbackWatchKey(nodeName, client, playSessionID, sessionID, deviceID string) string {
+	k := playSessionID
+	if k == "" {
+		k = sessionID
+	}
+	if k == "" {
+		k = deviceID
+	}
+	if k == "" {
+		return ""
+	}
+	return nodeName + "|" + client + "|" + k
+}
+
+// updateWatchSession advances the per-session position tracker and returns the
+// number of milliseconds of watched time to attribute for this report. It is
+// the single source of truth for precise duration:
+//   - forward advance within reason -> credited in full (normal play / re-watch)
+//   - backward move (seek back / pause) -> 0 credited
+//   - forward jump far beyond elapsed time -> credited at most elapsed*cap
+//     (the skipped, unseen portion is not counted)
+//
+// The map is mutated under playbackWatchMu. The caller is responsible for
+// persisting the returned increment into play_stats / play_buckets.
+func (s *Store) updateWatchSession(key string, curTicks, now int64) int64 {
+	s.playbackWatchMu.Lock()
+	defer s.playbackWatchMu.Unlock()
+	st, ok := s.playbackWatch[key]
+	if !ok || now-st.lastTS > watchSessionTTLMs {
+		// First sample for this session: seed the tracker, credit nothing yet.
+		s.playbackWatch[key] = &watchSession{lastTS: now, lastTicks: curTicks, watchedMs: 0}
 		return 0
 	}
-	if ms > maxPlaybackDurationMS {
-		return maxPlaybackDurationMS
+	elapsedMs := now - st.lastTS
+	deltaTicks := curTicks - st.lastTicks
+	st.lastTS = now
+	st.lastTicks = curTicks
+	if deltaTicks <= 0 {
+		// Seek backward or paused: not counted as watched time.
+		return 0
 	}
-	return ms
+	deltaMs := deltaTicks / 10000
+	inc := deltaMs
+	if cap := elapsedMs * watchSeekCapFactor; deltaMs > cap {
+		inc = cap
+	}
+	st.watchedMs += inc
+	return inc
+}
+
+// pruneStaleWatchSessions drops trackers that have not been updated recently.
+func (s *Store) pruneStaleWatchSessions(now int64) {
+	s.playbackWatchMu.Lock()
+	defer s.playbackWatchMu.Unlock()
+	for k, st := range s.playbackWatch {
+		if now-st.lastTS > watchSessionTTLMs {
+			delete(s.playbackWatch, k)
+		}
+	}
 }
 
 func headerOrQueryOrBody(headers http.Header, u *url.URL, body map[string]any, names ...string) string {
@@ -737,6 +787,7 @@ func (s *Store) PrunePlayBuckets(ctx context.Context, keepDays int) error {
 	if keepDays <= 0 {
 		keepDays = 3
 	}
+	s.pruneStaleWatchSessions(time.Now().UnixMilli())
 	cutoff := playbackBucketStart(time.Now().AddDate(0, 0, -keepDays).UnixMilli())
 	_, err := s.db.ExecContext(ctx, `DELETE FROM play_buckets WHERE bucket_start < ?`, cutoff)
 	return err

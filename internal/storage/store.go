@@ -30,6 +30,12 @@ type Store struct {
 	playbackQueue   chan PlaybackInput
 	playbackWG      sync.WaitGroup
 	playbackDropped uint64
+
+	// playbackWatch tracks per-session playback position so that actual watched
+	// duration can be accumulated from forward deltas (re-watches count, backward
+	// seeks / pauses do not, and forward jumps skip their unseen gap).
+	playbackWatch   map[string]*watchSession
+	playbackWatchMu sync.Mutex
 }
 
 type KV struct {
@@ -73,6 +79,7 @@ func New(dbPath string) (*Store, error) {
 		nodeCache:      map[string]cacheEntry[*Node]{},
 		nodeListCache:  map[string]cacheEntry[[]Node]{},
 		hostIndexCache: map[string]cacheEntry[map[string]HostMatch]{},
+		playbackWatch:  map[string]*watchSession{},
 	}
 	if err := store.InitSchema(context.Background()); err != nil {
 		_ = db.Close()
@@ -119,11 +126,6 @@ func (s *Store) InitSchema(ctx context.Context) error {
 			last_ts INTEGER NOT NULL
 		);
 		CREATE TABLE IF NOT EXISTS play_events (
-			k TEXT PRIMARY KEY,
-			day TEXT NOT NULL,
-			last_ts INTEGER NOT NULL
-		);
-		CREATE TABLE IF NOT EXISTS play_stop_events (
 			k TEXT PRIMARY KEY,
 			day TEXT NOT NULL,
 			last_ts INTEGER NOT NULL
