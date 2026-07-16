@@ -103,7 +103,12 @@ func (h *Handler) handleDirectWithClient(ctx context.Context, r *http.Request, r
 		res, err := h.doFetch(ctx, client, u, method, headers, body)
 		if err != nil {
 			if errors.Is(err, errForbiddenDirectHost) {
-				_ = res.Body.Close()
+				// res may be non-nil with a body when the redirect
+				// policy returns errForbiddenDirectHost; guard against
+				// the nil case to avoid a panic.
+				if res != nil && res.Body != nil {
+					_ = res.Body.Close()
+				}
 				capture.SetMeta(r, map[string]any{"mode": "direct", "node": directNodeName(nodeName), "stage": "direct-forbidden-redirect", "targetUrl": targetURL})
 				return localForbiddenResponse("direct", targetURL), nil
 			}
