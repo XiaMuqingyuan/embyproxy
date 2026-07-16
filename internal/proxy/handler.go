@@ -895,7 +895,13 @@ func (h *Handler) doFetch(ctx context.Context, client *http.Client, target *url.
 	req.Host = target.Host
 	res, err := client.Do(req)
 	if err != nil {
-		return res, err
+		// client.Do may return a non-nil response even on error; the
+		// caller only inspects err, so close the body here to avoid
+		// leaking the underlying connection.
+		if res != nil {
+			_ = res.Body.Close()
+		}
+		return nil, err
 	}
 	attachUpstreamClient(res, client)
 	return res, nil
