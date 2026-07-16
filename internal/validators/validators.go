@@ -246,8 +246,9 @@ func clamp(value, minValue, maxValue int) int {
 }
 
 func truncate(value string, max int) string {
-	if len(value) > max {
-		return value[:max]
+	runes := []rune(value)
+	if len(runes) > max {
+		return string(runes[:max])
 	}
 	return value
 }

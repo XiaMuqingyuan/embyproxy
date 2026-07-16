@@ -624,10 +624,15 @@ func (s *Store) updateWatchSession(key string, curTicks, now int64) int64 {
 		// Seek backward or paused: not counted as watched time.
 		return 0
 	}
+	if elapsedMs <= 0 {
+		// Clock went backwards (or no real elapsed time): do not credit
+		// negative watched time, which would corrupt duration stats.
+		return 0
+	}
 	deltaMs := deltaTicks / 10000
 	inc := deltaMs
-	if cap := elapsedMs * watchSeekCapFactor; deltaMs > cap {
-		inc = cap
+	if allowable := elapsedMs * watchSeekCapFactor; deltaMs > allowable {
+		inc = allowable
 	}
 	st.watchedMs += inc
 	return inc
