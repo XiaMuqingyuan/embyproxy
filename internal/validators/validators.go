@@ -80,9 +80,9 @@ func ValidateNodeInput(input map[string]any) Result {
 		Fav:                 ToBool(input["fav"]),
 		Rank:                rank,
 		Secret:              secret,
-		Tag:                 truncate(strings.TrimSpace(asString(input["tag"])), 64),
-		Note:                truncate(strings.TrimSpace(asString(input["note"])), 64),
-		DisplayName:         truncate(regexp.MustCompile(`\s+`).ReplaceAllString(strings.TrimSpace(asString(input["displayName"])), " "), 32),
+		Tag:                 Truncate(strings.TrimSpace(asString(input["tag"])), 64),
+		Note:                Truncate(strings.TrimSpace(asString(input["note"])), 64),
+		DisplayName:         Truncate(regexp.MustCompile(`\s+`).ReplaceAllString(strings.TrimSpace(asString(input["displayName"])), " "), 32),
 		DirectExternal:      ToBool(input["directExternal"]),
 		RenewDays:           renewDays,
 		RemindBeforeDays:    remindBeforeDays,
@@ -134,7 +134,7 @@ func ValidateSecret(value any) (string, string) {
 }
 
 func ValidateTag(value any) string {
-	return truncate(strings.TrimSpace(asString(value)), 64)
+	return Truncate(strings.TrimSpace(asString(value)), 64)
 }
 
 func ValidateImpersonateProfile(value any) (string, string) {
@@ -245,7 +245,7 @@ func clamp(value, minValue, maxValue int) int {
 	return value
 }
 
-func truncate(value string, max int) string {
+func Truncate(value string, max int) string {
 	runes := []rune(value)
 	if len(runes) > max {
 		return string(runes[:max])

@@ -951,12 +951,14 @@ func (h *Handler) tgSet(ctx context.Context, body map[string]any) map[string]any
 	if reportTime == "" {
 		reportTime = "00:00"
 	}
+	note := validators.Truncate(strings.TrimSpace(asString(cfgMap["note"])), 256)
 	cfg := storage.TGConfig{
 		Enabled:       validators.ToBool(cfgMap["enabled"]),
 		Token:         strings.TrimSpace(asString(cfgMap["token"])),
 		Chat:          strings.TrimSpace(asString(cfgMap["chat"])),
 		ReportEnabled: boolValue(cfgMap, "reportEnabled", validators.ToBool(cfgMap["enabled"])),
 		ReportTime:    reportTime,
+		Note:          note,
 	}
 	if err := h.store.SaveTGConfig(ctx, cfg); err != nil {
 		return fail(err.Error())

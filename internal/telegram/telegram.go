@@ -17,13 +17,31 @@ import (
 )
 
 type Service struct {
-	store *storage.Store
-	log   *logging.Logger
-	http  *http.Client
+	store               *storage.Store
+	log                 *logging.Logger
+	http                *http.Client
+	lastReportSent      bool
+	lastKeepaliveCount  int
 }
 
 func New(store *storage.Store, log *logging.Logger) *Service {
 	return &Service{store: store, log: log, http: &http.Client{Timeout: 12 * time.Second}}
+}
+
+// LastReportSent reports whether the most recent CheckAndSendReport invocation
+// actually sent a daily report. The flag is reset on each call.
+func (s *Service) LastReportSent() bool {
+	sent := s.lastReportSent
+	s.lastReportSent = false
+	return sent
+}
+
+// LastKeepaliveCount returns the number of keepalive notifications sent during
+// the most recent CheckKeepaliveAndNotify invocation and resets the counter.
+func (s *Service) LastKeepaliveCount() int {
+	count := s.lastKeepaliveCount
+	s.lastKeepaliveCount = 0
+	return count
 }
 
 func (s *Service) Send(ctx context.Context, token, chat, text string) bool {
@@ -103,6 +121,7 @@ func (s *Service) BuildReport(ctx context.Context, now int64) (string, error) {
 }
 
 func (s *Service) CheckAndSendReport(ctx context.Context) error {
+	s.lastReportSent = false
 	cfg, err := s.store.GetTGConfig(ctx)
 	if err != nil || !cfg.Enabled || !cfg.ReportEnabled || cfg.Token == "" || cfg.Chat == "" {
 		return err
@@ -132,6 +151,7 @@ func (s *Service) CheckAndSendReport(ctx context.Context) error {
 		return nil
 	}
 	_ = kv.Put(ctx, cntKey, "1")
+	s.lastReportSent = true
 	s.log.Debug("telegram", "daily report sent", map[string]any{"event": "dailyReportSent", "day": day, "count": 1})
 	return nil
 }
@@ -214,6 +234,7 @@ func formatReportRange(start, end time.Time) string {
 }
 
 func (s *Service) CheckKeepaliveAndNotify(ctx context.Context) error {
+	s.lastKeepaliveCount = 0
 	cfg, err := s.store.GetTGConfig(ctx)
 	if err != nil || !cfg.Enabled || cfg.Token == "" || cfg.Chat == "" {
 		return err
@@ -306,6 +327,7 @@ func (s *Service) CheckKeepaliveAndNotify(ctx context.Context) error {
 		_ = kv.Put(ctx, lastNotifyKey, strconv.FormatInt(now, 10))
 		_ = kv.Put(ctx, digestKey, digest)
 		_ = s.store.UpdateKeepaliveNotify(ctx, "admin", node.Name, day, notifyCount+1, day)
+		s.lastKeepaliveCount++
 		s.log.Debug("telegram", "keepalive sent", map[string]any{"event": "keepaliveSent", "node": node.Name, "day": day, "count": notifyCount + 1})
 	}
 	return nil

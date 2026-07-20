@@ -569,6 +569,7 @@ func (h *Handler) handleOneTarget(ctx context.Context, r *http.Request, node sto
 		return nil, err
 	}
 	if res.StatusCode == http.StatusForbidden && needCompatOrigin {
+		_ = res.Body.Close()
 		h2 := cloneHeader(headers)
 		if isEmosNode(node, targetURL, env) {
 			applyEmosHeaders(h2, env)
@@ -584,6 +585,7 @@ func (h *Handler) handleOneTarget(ctx context.Context, r *http.Request, node sto
 		}
 	}
 	if res.StatusCode == http.StatusForbidden {
+		_ = res.Body.Close()
 		res, currentHeaders, err = h.retryGeneral403(ctx, r, node, parsed, targetURL, headers, body, env, base)
 		if err != nil {
 			return nil, err

@@ -1122,6 +1122,15 @@
         letter-spacing: 0.14em;
         font-weight: 950;
       }
+      #statsTable th[data-sort] {
+        user-select: none;
+      }
+      #statsTable th[data-sort]:hover {
+        background: var(--line);
+      }
+      #statsTable th[data-sort].sort-active {
+        color: var(--ink-1);
+      }
       td {
         color: var(--ink-2);
       }
@@ -2521,14 +2530,14 @@
                 <table id="statsTable">
                   <thead>
                     <tr>
-                      <th>日期</th>
-                      <th>Emby 节点</th>
-                      <th>客户端</th>
-                      <th>播放次数</th>
-                      <th>会话数</th>
-                      <th>时长</th>
-                      <th>入站流量</th>
-                      <th>出站流量</th>
+                      <th data-sort="day">日期</th>
+                      <th data-sort="node">Emby 节点</th>
+                      <th data-sort="client">客户端</th>
+                      <th data-sort="plays">播放次数</th>
+                      <th data-sort="sessions">会话数</th>
+                      <th data-sort="durationMs">时长</th>
+                      <th data-sort="inboundBytes">入站流量</th>
+                      <th data-sort="outboundBytes">出站流量</th>
                     </tr>
                   </thead>
                   <tbody id="statsBody"></tbody>
@@ -3369,6 +3378,15 @@
               >日报推送时间 <span class="form-hint">北京时间</span></label
             >
             <input type="time" id="tg-reportTime" value="08:00" />
+          </div>
+
+          <div class="form-group form-full">
+            <label for="tg-note">服务器备注 <span class="form-hint">仅用于面板展示</span></label>
+            <textarea
+              id="tg-note"
+              rows="2"
+              placeholder="例如：家庭服务器 / 付费机场 / 测试机器人"
+            ></textarea>
           </div>
         </div>
         <div class="form-actions">
@@ -4445,6 +4463,7 @@
             c.reportEnabled === true;
           document.getElementById("tg-reportTime").value =
             c.reportTime || "08:00";
+          document.getElementById("tg-note").value = c.note || "";
         }
         syncTgReportControls();
         showModal("tgModal");
@@ -4468,6 +4487,7 @@
           chat: document.getElementById("tg-chat").value.trim(),
           reportEnabled: document.getElementById("tg-reportEnabled").checked,
           reportTime: document.getElementById("tg-reportTime").value,
+          note: document.getElementById("tg-note").value.trim(),
         };
         const r = await api("tg.set", { config });
         if (r.ok) {
@@ -4485,6 +4505,93 @@
         );
       }
 
+      let statsSort = { key: "day", dir: "desc" };
+      let lastStatsRows = [];
+
+      function sortStatsRows(rows) {
+        const { key, dir } = statsSort;
+        const mult = dir === "asc" ? 1 : -1;
+        const numericKeys = new Set([
+          "plays",
+          "sessions",
+          "durationMs",
+          "inboundBytes",
+          "outboundBytes",
+        ]);
+        return [...rows].sort((a, b) => {
+          let av = a[key];
+          let bv = b[key];
+          if (numericKeys.has(key)) {
+            av = Number(av || 0);
+            bv = Number(bv || 0);
+          } else {
+            av = String(av || "").toLowerCase();
+            bv = String(bv || "").toLowerCase();
+          }
+          if (av < bv) return -1 * mult;
+          if (av > bv) return 1 * mult;
+          return 0;
+        });
+      }
+
+      function renderStatsTable(rows) {
+        const tbody = document.getElementById("statsBody");
+        tbody.innerHTML = rows.length
+          ? rows
+              .map(
+                (s) => `
+    <tr><td>${esc(s.day)}</td><td>${esc(s.node)}</td><td>${esc(s.client)}</td><td>${s.plays}</td><td>${s.sessions}</td><td>${formatDuration(Number(s.durationMs || 0))}</td><td>${formatBytes(trafficInboundBytes(s))}</td><td>${formatBytes(trafficOutboundBytes(s))}</td></tr>
+  `,
+              )
+              .join("")
+          : '<tr><td class="table-empty" colspan="8">暂无数据</td></tr>';
+        updateStatsHeaderArrows();
+      }
+
+      function updateStatsHeaderArrows() {
+        document
+          .querySelectorAll("#statsTable th[data-sort]")
+          .forEach((th) => {
+            const key = th.getAttribute("data-sort");
+            let suffix = "";
+            if (key === statsSort.key) {
+              suffix = statsSort.dir === "asc" ? " ↑" : " ↓";
+              th.classList.add("sort-active");
+            } else {
+              th.classList.remove("sort-active");
+            }
+            const base = th.getAttribute("data-sort-label") || th.innerText.replace(/[ ↑↓]/g, "");
+            th.setAttribute("data-sort-label", base);
+            th.innerText = base + suffix;
+          });
+      }
+
+      function toggleStatsSort(key) {
+        if (statsSort.key === key) {
+          statsSort.dir = statsSort.dir === "asc" ? "desc" : "asc";
+        } else {
+          statsSort = { key, dir: "desc" };
+        }
+        localStorage.setItem("embyproxy_stats_sort", JSON.stringify(statsSort));
+        renderStatsTable(sortStatsRows(lastStatsRows));
+      }
+
+      (function initStatsSorting() {
+        try {
+          const saved = localStorage.getItem("embyproxy_stats_sort");
+          if (saved) statsSort = JSON.parse(saved);
+        } catch {}
+        document
+          .querySelectorAll("#statsTable th[data-sort]")
+          .forEach((th) => {
+            th.style.cursor = "pointer";
+            th.setAttribute("title", "点击排序");
+            th.addEventListener("click", () =>
+              toggleStatsSort(th.getAttribute("data-sort"))
+            );
+          });
+      })();
+
       async function loadStats() {
         const days = parseInt(document.getElementById("statsDays").value);
         const r = await api("stats.get", { days });
@@ -4493,6 +4600,7 @@
           return;
         }
         const stats = r.stats || [];
+        lastStatsRows = stats;
 
         let totalPlays = 0,
           totalSessions = 0,
@@ -4524,16 +4632,7 @@
     <div class="stat-block"><div class="val">${nodeSet.size}</div><div class="lbl">活跃节点</div></div>
     <div class="stat-block"><div class="val">${clientSet.size}</div><div class="lbl">客户端种类</div></div>
   `;
-        const tbody = document.getElementById("statsBody");
-        tbody.innerHTML = stats.length
-          ? stats
-              .map(
-                (s) => `
-    <tr><td>${esc(s.day)}</td><td>${esc(s.node)}</td><td>${esc(s.client)}</td><td>${s.plays}</td><td>${s.sessions}</td><td>${formatDuration(Number(s.durationMs || 0))}</td><td>${formatBytes(trafficInboundBytes(s))}</td><td>${formatBytes(trafficOutboundBytes(s))}</td></tr>
-  `,
-              )
-              .join("")
-          : '<tr><td class="table-empty" colspan="8">暂无数据</td></tr>';
+        renderStatsTable(sortStatsRows(stats));
       }
 
       function trafficInboundBytes(stat) {

@@ -22,11 +22,11 @@ func (s *Scheduler) Start(ctx context.Context) {
 	ticker := time.NewTicker(time.Minute)
 	go func() {
 		defer ticker.Stop()
-		s.log.Debug("scheduler", "started", map[string]any{"event": "schedulerStarted"})
+		s.log.Info("scheduler", "started", map[string]any{"event": "schedulerStarted"})
 		for {
 			select {
 			case <-ctx.Done():
-				s.log.Debug("scheduler", "stopped", map[string]any{"event": "schedulerStopped"})
+				s.log.Info("scheduler", "stopped", map[string]any{"event": "schedulerStopped"})
 				return
 			case <-ticker.C:
 				s.tick(ctx)
@@ -36,7 +36,6 @@ func (s *Scheduler) Start(ctx context.Context) {
 }
 
 func (s *Scheduler) tick(ctx context.Context) {
-	s.log.Debug("scheduler", "tick", map[string]any{"event": "schedulerTick"})
 	if s.cleanup != nil {
 		func() {
 			defer func() {
@@ -47,10 +46,19 @@ func (s *Scheduler) tick(ctx context.Context) {
 			s.cleanup()
 		}()
 	}
+	reportSent := false
 	if err := s.tg.CheckAndSendReport(ctx); err != nil {
 		s.log.Error("scheduler", "report error", map[string]any{"event": "reportError", "error": err.Error()})
+	} else {
+		reportSent = s.tg.LastReportSent()
 	}
+	keepaliveCount := 0
 	if err := s.tg.CheckKeepaliveAndNotify(ctx); err != nil {
 		s.log.Error("scheduler", "keepalive error", map[string]any{"event": "keepaliveError", "error": err.Error()})
+	} else {
+		keepaliveCount = s.tg.LastKeepaliveCount()
+	}
+	if reportSent || keepaliveCount > 0 {
+		s.log.Debug("scheduler", "tick done", map[string]any{"event": "schedulerTickDone", "reportSent": reportSent, "keepaliveCount": keepaliveCount})
 	}
 }

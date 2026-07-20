@@ -39,6 +39,7 @@ type TGConfig struct {
 	Chat          string `json:"chat"`
 	ReportEnabled bool   `json:"reportEnabled"`
 	ReportTime    string `json:"reportTime"`
+	Note          string `json:"note"`
 }
 
 type SystemConfig struct {

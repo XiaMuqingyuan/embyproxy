@@ -64,10 +64,10 @@ var Profiles = map[string]Profile{
 		Key:            "yamby",
 		Label:          "Yamby Android",
 		ClientName:     "Yamby",
-		ClientVersion:  "2.0.4.6",
+		ClientVersion:  "2.0.5.5",
 		DeviceName:     "Android",
 		DeviceIDFormat: "uuid",
-		UserAgent:      "Yamby/2.0.4.6(Android",
+		UserAgent:      "Yamby/2.0.5.5(Android",
 	},
 	"hills_android": {
 		Key:            "hills_android",
