@@ -20,7 +20,7 @@ func TestRewriteMediaBrowserAuthorization(t *testing.T) {
 	yamby := Snapshot{
 		Profile:       DefaultProfile,
 		ClientName:    "Yamby",
-		ClientVersion: "2.0.4.6",
+		ClientVersion: "2.0.6.1",
 		DeviceName:    "Android",
 		DeviceID:      testYambyDeviceID,
 	}
@@ -48,13 +48,13 @@ func TestRewriteMediaBrowserAuthorization(t *testing.T) {
 			name: "yamby rewrites emby auth without user id field",
 			raw:  `Emby UserId=user-from-auth,Client="Source Client",Device="Source Device",DeviceId="source-device-id",Version="0.0.0-test"`,
 			snap: yamby,
-			want: `Emby Client=Yamby,Device=Android,DeviceId=` + testYambyDeviceID + `,Version=2.0.4.6`,
+			want: `Emby Client=Yamby,Device=Android,DeviceId=` + testYambyDeviceID + `,Version=2.0.6.1`,
 		},
 		{
 			name: "yamby rewrites media browser auth without token field",
 			raw:  testSourceMediaBrowserAuth,
 			snap: yamby,
-			want: `Emby Client=Yamby,Device=Android,DeviceId=` + testYambyDeviceID + `,Version=2.0.4.6`,
+			want: `Emby Client=Yamby,Device=Android,DeviceId=` + testYambyDeviceID + `,Version=2.0.6.1`,
 		},
 		{
 			name: "keeps non emby bearer authorization",

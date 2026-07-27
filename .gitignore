@@ -18,6 +18,7 @@
 .claude/
 .codex/
 .vscode/
+.zcode/
 AGENTS.md
 CLAUDE.md
 
