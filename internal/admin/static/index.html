@@ -1070,10 +1070,32 @@
       }
       .chart-wrap {
         position: relative;
-        height: 280px;
+        min-height: 280px;
+        height: 35vh;
+        max-height: 560px;
       }
       .chart-wrap-tall {
-        height: 520px;
+        min-height: 360px;
+        height: 55vh;
+        max-height: 700px;
+      }
+      @media (max-width: 860px) {
+        .chart-wrap {
+          height: 30vh;
+          min-height: 220px;
+        }
+        .chart-wrap-tall {
+          height: 40vh;
+          min-height: 280px;
+        }
+      }
+      @media (min-height: 1000px) {
+        .chart-wrap {
+          height: 40vh;
+        }
+        .chart-wrap-tall {
+          height: 60vh;
+        }
       }
       .charts-empty {
         margin-top: 24px;
@@ -5850,6 +5872,18 @@
         const utc8 = new Date(d.getTime() + 8 * 60 * 60 * 1000);
         return `${utc8.getUTCFullYear()}${p(utc8.getUTCMonth() + 1)}${p(utc8.getUTCDate())}-${p(utc8.getUTCHours())}${p(utc8.getUTCMinutes())}${p(utc8.getUTCSeconds())}`;
       }
+
+      // 窗口缩放时重绘图表，确保 vh 高度变化后 chart 填满新容器
+      let chartsResizeTimer = null;
+      function resizeCharts() {
+        for (const key of Object.keys(chartInstances)) {
+          try { chartInstances[key].resize(); } catch {}
+        }
+      }
+      window.addEventListener("resize", () => {
+        clearTimeout(chartsResizeTimer);
+        chartsResizeTimer = setTimeout(resizeCharts, 150);
+      });
 
       function toast(msg, type = "info") {
         const el = document.createElement("div");
