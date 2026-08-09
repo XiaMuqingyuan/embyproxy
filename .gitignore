@@ -22,5 +22,8 @@
 AGENTS.md
 CLAUDE.md
 
+# Mimosa 安全扫描本地状态
+.mimosa/
+
 # 本地文档和归档
 /docs/
