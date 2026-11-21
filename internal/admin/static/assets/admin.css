@@ -1473,7 +1473,7 @@
         grid-template-rows: auto minmax(0, 1fr) auto;
         overflow: hidden;
         padding: 0;
-        background: linear-gradient(135deg, #fffdf8 0%, #f6f0e4 100%);
+        background: linear-gradient(135deg, var(--paper) 0%, var(--paper-2) 100%);
       }
       .sheet-head {
         display: flex;
@@ -2430,4 +2430,21 @@
       [data-theme="dark"] .auth-manifest,
       [data-theme="dark"] .command-rail {
         color-scheme: dark;
+      }
+      /* 侧栏 logo：深色底承托浅色 SVG，避免白底浅字 */
+      [data-theme="dark"] .rail-logo {
+        background: var(--paper-2);
+        color: var(--pine);
+      }
+      /* 激活导航按钮：深色底浅色文字，避免白块刺眼 */
+      [data-theme="dark"] .rail-button.active {
+        background: var(--pine-wash);
+        color: var(--pine);
+      }
+      [data-theme="dark"] .rail-button.active::before {
+        background: var(--pine);
+      }
+      /* 开关选中态圆点用深色，避免浅色轨道上白点糊掉 */
+      [data-theme="dark"] .policy-switch input:checked + .policy-toggle::after {
+        background: var(--pine-2);
       }
