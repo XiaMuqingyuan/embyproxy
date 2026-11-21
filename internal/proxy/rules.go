@@ -206,27 +206,3 @@ func routePrefix(name, key string) string {
 	}
 	return prefix
 }
-
-func sameHost(a, b string) bool {
-	ua, errA := url.Parse(a)
-	ub, errB := url.Parse(b)
-	if errA != nil || errB != nil {
-		return false
-	}
-	ha := strings.ToLower(ua.Hostname())
-	hb := strings.ToLower(ub.Hostname())
-	if ha != hb {
-		return false
-	}
-	return portOf(ua) == portOf(ub)
-}
-
-func portOf(u *url.URL) string {
-	if u.Port() != "" {
-		return u.Port()
-	}
-	if u.Scheme == "https" {
-		return "443"
-	}
-	return "80"
-}

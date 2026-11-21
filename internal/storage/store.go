@@ -5,11 +5,9 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/url"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -589,28 +587,4 @@ func cloneHostIndex(in map[string]HostMatch) map[string]HostMatch {
 		out[key] = value
 	}
 	return out
-}
-
-func intFromAny(value any) int {
-	switch v := value.(type) {
-	case int:
-		return v
-	case int64:
-		return int(v)
-	case float64:
-		return int(v)
-	case string:
-		n, _ := strconv.Atoi(strings.TrimSpace(v))
-		return n
-	default:
-		return 0
-	}
-}
-
-func mustJSON(value any) string {
-	b, err := json.Marshal(value)
-	if err != nil {
-		return fmt.Sprint(value)
-	}
-	return string(b)
 }

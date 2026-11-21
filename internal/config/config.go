@@ -146,15 +146,3 @@ func envInt(key string, fallback int) int {
 	}
 	return n
 }
-
-func envBool(key string, fallback bool) bool {
-	v, ok := os.LookupEnv(key)
-	if !ok {
-		return fallback
-	}
-	s := strings.TrimSpace(strings.ToLower(v))
-	if s == "" || s == "0" || s == "false" || s == "off" || s == "no" {
-		return false
-	}
-	return s == "1" || s == "true" || s == "yes" || s == "on"
-}

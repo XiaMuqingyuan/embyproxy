@@ -19,6 +19,7 @@
 .codex/
 .vscode/
 .zcode/
+.workbuddy-ai/
 AGENTS.md
 CLAUDE.md
 

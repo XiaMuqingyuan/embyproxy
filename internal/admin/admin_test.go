@@ -3,10 +3,12 @@ package admin
 import (
 	"context"
 	"fmt"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -50,6 +52,113 @@ func TestServeAdminValidatesTokenConfig(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestServeEmbeddedAssets(t *testing.T) {
+	handler := New(config.Config{}, nil, nil, nil, nil, nil)
+	assetFiles := []string{"static/assets/admin.css"}
+	jsEntries, err := fs.ReadDir(assetsFS, "static/assets/js")
+	if err != nil {
+		t.Fatalf("read embedded JS directory: %v", err)
+	}
+	for _, entry := range jsEntries {
+		if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".js") {
+			assetFiles = append(assetFiles, "static/assets/js/"+entry.Name())
+		}
+	}
+	for _, file := range assetFiles {
+		t.Run(file, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/admin/"+file, nil))
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+			}
+			if got := rec.Header().Get("Cache-Control"); got != "no-cache" {
+				t.Errorf("Cache-Control = %q, want no-cache", got)
+			}
+			if got := rec.Header().Get("X-Content-Type-Options"); got != "nosniff" {
+				t.Errorf("X-Content-Type-Options = %q, want nosniff", got)
+			}
+			wantType := "application/javascript; charset=utf-8"
+			if strings.HasSuffix(file, ".css") {
+				wantType = "text/css; charset=utf-8"
+			}
+			if got := rec.Header().Get("Content-Type"); got != wantType {
+				t.Errorf("Content-Type = %q, want %q", got, wantType)
+			}
+			wantBody, err := assetsFS.ReadFile(file)
+			if err != nil {
+				t.Fatalf("read embedded asset: %v", err)
+			}
+			if rec.Body.String() != string(wantBody) {
+				t.Error("response differs from embedded asset")
+			}
+
+			headRec := httptest.NewRecorder()
+			handler.ServeHTTP(headRec, httptest.NewRequest(http.MethodHead, "/admin/"+file, nil))
+			if headRec.Code != http.StatusOK || headRec.Body.Len() != 0 {
+				t.Errorf("HEAD status = %d, body bytes = %d", headRec.Code, headRec.Body.Len())
+			}
+		})
+	}
+}
+
+func TestServeAssetRejectsDirectoriesAndInvalidPaths(t *testing.T) {
+	handler := New(config.Config{}, nil, nil, nil, nil, nil)
+	tests := []struct {
+		name   string
+		method string
+		target string
+		status int
+	}{
+		{name: "directory root", target: "/admin/assets/", status: http.StatusNotFound},
+		{name: "subdirectory", target: "/admin/assets/js/", status: http.StatusNotFound},
+		{name: "directory without slash", target: "/admin/assets/js", status: http.StatusNotFound},
+		{name: "unsupported extension", target: "/admin/assets/admin.css.map", status: http.StatusNotFound},
+		{name: "dot path", target: "/admin/assets/../index.html", status: http.StatusNotFound},
+		{name: "backslash path", target: `/admin/assets/%5c..%5cindex.html`, status: http.StatusNotFound},
+		{name: "double encoded separator", target: "/admin/assets/%252e%252e/index.html", status: http.StatusNotFound},
+		{name: "missing file", target: "/admin/assets/js/missing.js", status: http.StatusNotFound},
+		{name: "post asset", method: http.MethodPost, target: "/admin/assets/admin.css", status: http.StatusNotFound},
+		{name: "post directory", method: http.MethodPost, target: "/admin/assets", status: http.StatusNotFound},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			method := tt.method
+			if method == "" {
+				method = http.MethodGet
+			}
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, httptest.NewRequest(method, tt.target, nil))
+			if rec.Code != tt.status {
+				t.Errorf("status = %d, want %d", rec.Code, tt.status)
+			}
+		})
+	}
+}
+
+func TestServeAssetRedirect(t *testing.T) {
+	handler := New(config.Config{}, nil, nil, nil, nil, nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/admin/assets?v=1", nil))
+	if rec.Code != http.StatusPermanentRedirect {
+		t.Errorf("status = %d, want %d", rec.Code, http.StatusPermanentRedirect)
+	}
+	if got := rec.Header().Get("Location"); got != "/admin/assets/?v=1" {
+		t.Errorf("Location = %q, want /admin/assets/?v=1", got)
+	}
+}
+
+func TestAdminHTMLReferencesEmbeddedAssets(t *testing.T) {
+	refs := regexp.MustCompile(`(?:src|href)="/admin/(assets/[^"]+)"`).FindAllStringSubmatch(indexHTML, -1)
+	if len(refs) == 0 {
+		t.Fatal("admin HTML has no asset references")
+	}
+	for _, ref := range refs {
+		if _, err := fs.Stat(assetsFS, "static/"+ref[1]); err != nil {
+			t.Errorf("missing embedded reference %q: %v", ref[1], err)
+		}
 	}
 }
 

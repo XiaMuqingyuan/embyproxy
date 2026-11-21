@@ -4,11 +4,12 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	_ "embed"
+	"embed"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
 	"net/url"
 	"os"
@@ -39,6 +40,15 @@ var indexHTML string
 
 //go:embed static/chart.umd.min.js
 var chartJS string
+
+//go:embed static/assets
+var assetsFS embed.FS
+
+// 仅暴露白名单扩展名内的实际文件，避免目录浏览和意外的源码文件公开。
+var assetContentTypes = map[string]string{
+	".css": "text/css; charset=utf-8",
+	".js":  "application/javascript; charset=utf-8",
+}
 
 type ResetFunc func(uid, name string)
 
@@ -96,6 +106,22 @@ func New(cfg config.Config, store *storage.Store, checker *auth.Checker, tg *tel
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path == "/admin/assets" {
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			http.NotFound(w, r)
+			return
+		}
+		target := "/admin/assets/"
+		if r.URL.RawQuery != "" {
+			target += "?" + r.URL.RawQuery
+		}
+		http.Redirect(w, r, target, http.StatusPermanentRedirect)
+		return
+	}
+	if strings.HasPrefix(r.URL.Path, "/admin/assets/") {
+		h.serveAsset(w, r)
+		return
+	}
 	path := strings.TrimSuffix(r.URL.Path, "/")
 	if r.Method == http.MethodGet && (path == "/admin" || path == "") {
 		capture.SetMeta(r, map[string]any{"mode": "admin", "stage": "admin-page"})
@@ -130,7 +156,46 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) serveIndex(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-cache")
 	http.ServeContent(w, r, "index.html", time.Time{}, strings.NewReader(indexHTML))
+}
+
+// serveAsset 提供前端静态资源（CSS / JS modules）。
+func (h *Handler) serveAsset(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		http.NotFound(w, r)
+		return
+	}
+	name := strings.TrimPrefix(r.URL.EscapedPath(), "/admin/assets/")
+	if name == "" || !fs.ValidPath(name) || strings.Contains(name, "\\") {
+		http.NotFound(w, r)
+		return
+	}
+	contentType, allowed := assetContentTypes[path.Ext(name)]
+	if !allowed {
+		http.NotFound(w, r)
+		return
+	}
+	file, err := assetsFS.Open("static/assets/" + name)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil || info.IsDir() {
+		http.NotFound(w, r)
+		return
+	}
+	content, err := io.ReadAll(file)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	http.ServeContent(w, r, info.Name(), time.Time{}, bytes.NewReader(content))
 }
 
 func (h *Handler) streamLogs(w http.ResponseWriter, r *http.Request) {
@@ -1119,23 +1184,23 @@ func (h *Handler) reset(uid, name string) {
 
 func exportNode(node storage.Node) map[string]any {
 	out := map[string]any{
-		"name":                node.Name,
-		"target":              node.Target,
-		"streamTarget":        node.StreamTarget,
-		"fav":                 node.Fav,
-		"secret":              node.Secret,
-		"tag":                 node.Tag,
-		"note":                node.Note,
-		"displayName":         node.DisplayName,
-		"directExternal":      node.DirectExternal,
-		"renewDays":           node.RenewDays,
-		"remindBeforeDays":    node.RemindBeforeDays,
-		"keepaliveAt":         node.KeepaliveAt,
-		"keepaliveMaxPerDay":  node.KeepaliveMaxPerDay,
-		"keepaliveChangeOnly": node.KeepaliveChangeOnly,
-		"impersonate":             node.Impersonate,
-		"impersonateProfile":      node.ImpersonateProfile,
-		"impersonateDeviceName":   node.ImpersonateDeviceName,
+		"name":                  node.Name,
+		"target":                node.Target,
+		"streamTarget":          node.StreamTarget,
+		"fav":                   node.Fav,
+		"secret":                node.Secret,
+		"tag":                   node.Tag,
+		"note":                  node.Note,
+		"displayName":           node.DisplayName,
+		"directExternal":        node.DirectExternal,
+		"renewDays":             node.RenewDays,
+		"remindBeforeDays":      node.RemindBeforeDays,
+		"keepaliveAt":           node.KeepaliveAt,
+		"keepaliveMaxPerDay":    node.KeepaliveMaxPerDay,
+		"keepaliveChangeOnly":   node.KeepaliveChangeOnly,
+		"impersonate":           node.Impersonate,
+		"impersonateProfile":    node.ImpersonateProfile,
+		"impersonateDeviceName": node.ImpersonateDeviceName,
 	}
 	if node.Rank != nil {
 		out["rank"] = *node.Rank
