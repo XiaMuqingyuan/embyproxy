@@ -20,7 +20,7 @@ func TestRewriteMediaBrowserAuthorization(t *testing.T) {
 	yamby := Snapshot{
 		Profile:       DefaultProfile,
 		ClientName:    "Yamby",
-		ClientVersion: "2.0.6.1",
+		ClientVersion: "2.1.1.0",
 		DeviceName:    "Android",
 		DeviceID:      testYambyDeviceID,
 	}
@@ -34,7 +34,7 @@ func TestRewriteMediaBrowserAuthorization(t *testing.T) {
 	hillsAndroid := Snapshot{
 		Profile:       "hills_android",
 		ClientName:    "Hills",
-		ClientVersion: "1.7.2",
+		ClientVersion: "1.11.0",
 		DeviceName:    "Xiaomi-23046RP50C",
 		DeviceID:      testHillsAndroidID,
 	}

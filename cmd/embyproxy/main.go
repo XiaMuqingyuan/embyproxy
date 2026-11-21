@@ -159,6 +159,7 @@ func applyRuntimeConfig(ctx context.Context, store *storage.Store, log *logging.
 		log.Warn("startup", "system config lookup failed", map[string]any{"event": "systemConfigLookupFailed", "error": err.Error()})
 		return
 	}
+	log.SetEnabled(systemCfg.LogEnabled)
 	log.Configure(systemCfg.LogLevel, systemCfg.LogAccess)
 }
 

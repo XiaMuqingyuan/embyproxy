@@ -2,6 +2,8 @@
 // 配置弹窗的回填/保存由同一份字段描述表驱动，新增字段只改一处。
 
 import { api } from "./api.js";
+import { state } from "./state.js";
+import { loadLogs } from "./logs.js";
 import {
   toast,
   formatBytes,
@@ -17,6 +19,7 @@ import { showModal, hideModal } from "./modal.js";
 //   load 把后端值转成表单值（缺省直存）
 //   read 保存时从表单读取的方式
 const CONFIG_FIELDS = [
+  { id: "cfg-logEnabled", key: "logEnabled", load: (v) => v === true, read: "checked" },
   { id: "cfg-logLevel", key: "logLevel", load: safeLogLevel, read: "value" },
   { id: "cfg-logAccess", key: "logAccess", load: (v) => v !== false, read: "checked" },
   { id: "cfg-capyStripEmby", key: "capyStripEmby", load: flagEnabled, read: "flag" },
@@ -141,6 +144,9 @@ async function saveConfig() {
   if (r.ok) {
     hideModal("configModal");
     toast("系统配置已保存", "ok");
+    // 日志总开关可能刚被切换，若当前在日志页则刷新以同步
+    // 空态文案、实时流开关与"实时日志"复选框状态。
+    if (state.currentTab === "logs") loadLogs();
   } else toast("保存失败: " + r.error, "err");
 }
 

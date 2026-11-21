@@ -101,11 +101,15 @@ var (
 type Logger struct {
 	level     atomic.Int64
 	accessLog atomic.Bool
+	enabled   atomic.Bool
 	seq       atomic.Uint64
 	// mu keeps buffer and history on the same side of a clear boundary.
 	mu      sync.Mutex
 	buffer  *logBuffer
 	history *logHistory
+	// historyConfig remembers the configured history target so history can be
+	// reopened when logging is re-enabled after being disabled.
+	historyConfig *historyConfig
 	subMu   sync.Mutex
 	subs    map[chan LogEntry]struct{}
 }
@@ -156,6 +160,12 @@ type logHistory struct {
 	done            chan struct{}
 }
 
+type historyConfig struct {
+	path           string
+	entriesPerFile int
+	maxFiles       int
+}
+
 func (f LogFilter) empty() bool {
 	return len(f.Levels) == 0 && strings.TrimSpace(f.Query) == ""
 }
@@ -186,8 +196,37 @@ func filterLogEntries(entries []LogEntry, filter LogFilter) []LogEntry {
 
 func New(level string, accessLog bool) *Logger {
 	l := &Logger{buffer: newLogBuffer(DefaultBufferCapacity)}
+	l.enabled.Store(true)
 	l.Configure(level, accessLog)
 	return l
+}
+
+// SetEnabled toggles whether log entries are recorded at all. When disabled,
+// write returns early: nothing is buffered, persisted, broadcast, or printed.
+// The history file handle is closed while disabled and reopened on re-enable.
+func (l *Logger) SetEnabled(enabled bool) {
+	if l == nil {
+		return
+	}
+	l.enabled.Store(enabled)
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if !enabled {
+		if l.history != nil {
+			_ = l.history.Close()
+			l.history = nil
+		}
+		return
+	}
+	l.openHistoryLocked()
+}
+
+// RecordingEnabled reports whether log entries are currently recorded.
+func (l *Logger) RecordingEnabled() bool {
+	if l == nil {
+		return false
+	}
+	return l.enabled.Load()
 }
 
 // Configure updates logging behavior for future writes.
@@ -205,11 +244,11 @@ func (l *Logger) NextRequestID(prefix string) string {
 }
 
 func (l *Logger) AccessEnabled() bool {
-	return l.accessLog.Load()
+	return l.accessLog.Load() && l.RecordingEnabled()
 }
 
 func (l *Logger) Enabled(level string) bool {
-	return int(l.level.Load()) >= levels[normalizeLevel(level)]
+	return l.RecordingEnabled() && int(l.level.Load()) >= levels[normalizeLevel(level)]
 }
 
 func (l *Logger) Subscribe(buf int) (<-chan LogEntry, func()) {
@@ -323,13 +362,26 @@ func (l *Logger) EnableHistory(path string, entriesPerFile, maxFiles int) error 
 	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	l.historyConfig = &historyConfig{path: path, entriesPerFile: entriesPerFile, maxFiles: maxFiles}
 	if l.history != nil {
 		if err := l.history.Close(); err != nil {
 			return err
 		}
 		l.history = nil
 	}
-	history, err := newLogHistory(path, entriesPerFile, maxFiles)
+	if !l.RecordingEnabled() {
+		return nil
+	}
+	return l.openHistoryLocked()
+}
+
+// openHistoryLocked opens the configured history file when logging is enabled.
+// Caller must hold l.mu.
+func (l *Logger) openHistoryLocked() error {
+	if l.history != nil || l.historyConfig == nil || !l.RecordingEnabled() {
+		return nil
+	}
+	history, err := newLogHistory(l.historyConfig.path, l.historyConfig.entriesPerFile, l.historyConfig.maxFiles)
 	if err != nil {
 		return err
 	}
@@ -430,6 +482,9 @@ func (l *Logger) Warn(scope, msg string, meta map[string]any)  { l.write("warn",
 func (l *Logger) Error(scope, msg string, meta map[string]any) { l.write("error", scope, msg, meta) }
 
 func (l *Logger) write(level, scope, msg string, meta map[string]any) {
+	if !l.RecordingEnabled() {
+		return
+	}
 	level = normalizeLevel(level)
 	status := promotedMetaValue(meta, "status")
 	parts := []string{localtime.RFC3339(time.Now()), "[" + strings.ToUpper(level) + "]"}

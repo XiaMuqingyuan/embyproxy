@@ -235,6 +235,32 @@ func TestDispatchLogsListSupportsPageNumber(t *testing.T) {
 	}
 }
 
+func TestStreamLogsDisabledReturnsImmediately(t *testing.T) {
+	handler, closeStore := newConfigTestHandler(t)
+	defer closeStore()
+	handler.log.SetEnabled(false)
+	// 注意：这里用未取消的 context。若关闭分支没有提前返回，
+	// streamLogs 会进入长循环导致测试超时，从而暴露回归。
+	req := httptest.NewRequest(http.MethodGet, "/admin/logs/stream", nil)
+	rec := httptest.NewRecorder()
+
+	handler.streamLogs(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	if got := rec.Header().Get("Content-Type"); got != "text/event-stream" {
+		t.Fatalf("Content-Type = %q, want text/event-stream", got)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, ": logging-disabled") {
+		t.Fatalf("body = %q, want logging-disabled comment", body)
+	}
+	if strings.Contains(body, ": connected") {
+		t.Fatalf("body = %q, should not enter streaming loop when disabled", body)
+	}
+}
+
 func TestStreamLogsSendsInitialComment(t *testing.T) {
 	handler, closeStore := newConfigTestHandler(t)
 	defer closeStore()

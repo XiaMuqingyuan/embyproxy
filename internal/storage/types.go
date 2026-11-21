@@ -43,6 +43,7 @@ type TGConfig struct {
 }
 
 type SystemConfig struct {
+	LogEnabled                  bool   `json:"logEnabled"`
 	LogLevel                    string `json:"logLevel"`
 	LogAccess                   bool   `json:"logAccess"`
 	CapyStripEmby               string `json:"capyStripEmby"`
@@ -73,6 +74,7 @@ var targetSplitRE = regexp.MustCompile(`\r?\n|[;,，；|]+`)
 
 func DefaultSystemConfig() SystemConfig {
 	return SystemConfig{
+		LogEnabled:                  false,
 		LogLevel:                    "info",
 		LogAccess:                   true,
 		CapyStripEmby:               "0",

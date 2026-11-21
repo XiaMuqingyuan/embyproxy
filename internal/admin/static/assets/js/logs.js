@@ -22,6 +22,7 @@ let logSearchTimer = null;
 let logStreamController = null;
 let logStreamToken = 0;
 let lastLogSeenId = 0;
+let logEnabled = true;
 let lastLogStreamId = 0;
 let logViewEpoch = 0;
 let logGapRefreshPending = false;
@@ -59,6 +60,8 @@ export async function loadLogs(
     return false;
   }
   const logs = Array.isArray(r.logs) ? r.logs : [];
+  logEnabled = r.logEnabled !== false;
+  syncLogEnabledControls();
   const currentIds = new Set(
     lastLogEntries.map(logEntryId).filter((id) => id > 0),
   );
@@ -162,7 +165,9 @@ function renderLogs(logs, meta = {}) {
   updateLogPager();
   if (!consoleEl) return;
   if (!logs.length) {
-    consoleEl.innerHTML = '<div class="log-empty">暂无运行日志</div>';
+    consoleEl.innerHTML = logEnabled
+      ? '<div class="log-empty">暂无运行日志</div>'
+      : '<div class="log-empty">日志记录已关闭，可在「配置 → 日志设置」中开启后再排查问题</div>';
     resetPendingLogCount();
     return;
   }
@@ -337,6 +342,10 @@ function setLogAutoRefresh(enabled) {
 }
 
 function syncLogRealtime() {
+  if (!logEnabled) {
+    stopLogRealtime("已关闭", "paused");
+    return;
+  }
   if (!isLogRealtimeEnabled()) {
     stopLogRealtime();
     return;
@@ -350,8 +359,19 @@ function syncLogRealtime() {
   if (!logStreamController && !logRefreshTimer) startLogStream();
 }
 
+// syncLogEnabledControls 根据后端日志总开关更新实时日志控件。
+// 关闭时禁用复选框并停止实时流，避免空挂连接。
+function syncLogEnabledControls() {
+  const auto = document.getElementById("logAutoRefresh");
+  if (auto) auto.disabled = !logEnabled;
+  if (!logEnabled) {
+    stopLogRealtime("已关闭", "paused");
+  }
+}
+
 function isLogStreamAllowed() {
   return (
+    logEnabled &&
     state.currentTab === "logs" &&
     currentLogPage === 1 &&
     currentLogQuery === ""
@@ -359,7 +379,7 @@ function isLogStreamAllowed() {
 }
 
 function isLogRealtimeEnabled() {
-  return !!document.getElementById("logAutoRefresh")?.checked;
+  return logEnabled && !!document.getElementById("logAutoRefresh")?.checked;
 }
 
 async function startLogStream() {
@@ -397,7 +417,7 @@ async function startLogStream() {
       buffer = consumeLogStreamBuffer(buffer, token, streamEpoch);
     }
     if (buffer.trim()) handleLogStreamFrame(buffer, token, streamEpoch);
-    if (!controller.signal.aborted && token === logStreamToken)
+    if (!controller.signal.aborted && token === logStreamToken && logEnabled)
       startLogAutoRefresh();
   } catch (e) {
     if (!controller.signal.aborted && token === logStreamToken) {

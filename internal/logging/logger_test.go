@@ -2,6 +2,7 @@ package logging
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -100,6 +101,123 @@ func TestLoggerEntriesReturnQuerylessConsoleLines(t *testing.T) {
 		if !strings.Contains(got.Line, want) {
 			t.Fatalf("entry line = %q, want to contain %q", got.Line, want)
 		}
+	}
+}
+
+func TestLoggerDisabledSkipsAllRecording(t *testing.T) {
+	log := New("debug", true)
+	ch, cancel := log.Subscribe(4)
+	defer cancel()
+
+	log.SetEnabled(false)
+	if log.RecordingEnabled() {
+		t.Fatal("RecordingEnabled() = true after SetEnabled(false)")
+	}
+	if log.AccessEnabled() {
+		t.Fatal("AccessEnabled() = true while recording disabled")
+	}
+	if log.Enabled("error") {
+		t.Fatal("Enabled(error) = true while recording disabled")
+	}
+
+	log.Info("test", "disabled line", nil)
+	log.Error("test", "disabled error", nil)
+
+	if entries := log.Entries(10); len(entries) != 0 {
+		t.Fatalf("entries = %+v, want none while disabled", entries)
+	}
+	select {
+	case entry := <-ch:
+		t.Fatalf("received %+v, want no broadcast while disabled", entry)
+	default:
+	}
+
+	log.SetEnabled(true)
+	log.Info("test", "enabled line", nil)
+	if entries := log.Entries(10); len(entries) != 1 || entries[0].Message != "enabled line" {
+		t.Fatalf("entries after re-enable = %+v, want one line", entries)
+	}
+}
+
+func TestLoggerDisabledSkipsHistoryFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "logs.jsonl")
+	log := New("debug", true)
+	if err := log.EnableHistory(path, 100, 2); err != nil {
+		t.Fatalf("EnableHistory() error = %v", err)
+	}
+	defer log.Close()
+
+	log.SetEnabled(false)
+	log.Info("test", "not written", nil)
+	if err := log.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil && !os.IsNotExist(err) {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	if strings.Contains(string(data), "not written") {
+		t.Fatalf("history file contains disabled line: %q", data)
+	}
+}
+
+func TestLoggerHistoryFollowsEnableToggle(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "logs.jsonl")
+	log := New("debug", true)
+	if err := log.EnableHistory(path, 100, 2); err != nil {
+		t.Fatalf("EnableHistory() error = %v", err)
+	}
+	defer log.Close()
+
+	log.Info("test", "before disable", nil)
+	log.SetEnabled(false)
+	if log.history != nil {
+		t.Fatal("history handle still open after SetEnabled(false)")
+	}
+	log.Info("test", "while disabled", nil)
+
+	log.SetEnabled(true)
+	if log.history == nil {
+		t.Fatal("history handle not reopened after SetEnabled(true)")
+	}
+	log.Info("test", "after enable", nil)
+	if err := log.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	text := string(data)
+	if !strings.Contains(text, "before disable") {
+		t.Errorf("history missing line written before disable: %q", text)
+	}
+	if strings.Contains(text, "while disabled") {
+		t.Errorf("history contains line written while disabled: %q", text)
+	}
+	if !strings.Contains(text, "after enable") {
+		t.Errorf("history missing line written after re-enable: %q", text)
+	}
+}
+
+func TestLoggerEnableHistoryWhileDisabledDoesNotOpenFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "sub", "logs.jsonl")
+	log := New("debug", true)
+	log.SetEnabled(false)
+	if err := log.EnableHistory(path, 100, 2); err != nil {
+		t.Fatalf("EnableHistory() error = %v", err)
+	}
+	defer log.Close()
+	if log.history != nil {
+		t.Fatal("history opened while logging disabled")
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("history file created while disabled, stat err = %v", err)
 	}
 }
 

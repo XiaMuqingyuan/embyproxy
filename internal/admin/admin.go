@@ -202,6 +202,15 @@ func (h *Handler) serveAsset(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) streamLogs(w http.ResponseWriter, r *http.Request) {
 	capture.Suppress(r)
 	requestlog.SuppressAccessLog(r.Context())
+	if h.log == nil || !h.log.RecordingEnabled() {
+		// 日志关闭时不挂长连接，返回 SSE 注释帧并立即结束，
+		// 前端据此停止重连，避免空转的 goroutine 与 ticker。
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.WriteHeader(http.StatusOK)
+		_, _ = fmt.Fprint(w, ": logging-disabled\n\n")
+		return
+	}
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": "当前响应不支持日志流"})
@@ -778,7 +787,7 @@ func (h *Handler) clearLogs() map[string]any {
 
 func (h *Handler) listLogs(body map[string]any) map[string]any {
 	if h.log == nil {
-		return map[string]any{"ok": true, "logs": []logging.LogEntry{}, "capacity": 0, "hasOlder": false, "oldestId": uint64(0), "newestId": uint64(0), "streamId": uint64(0), "page": 1, "totalPages": 1, "totalEntries": 0}
+		return map[string]any{"ok": true, "logs": []logging.LogEntry{}, "capacity": 0, "hasOlder": false, "oldestId": uint64(0), "newestId": uint64(0), "streamId": uint64(0), "page": 1, "totalPages": 1, "totalEntries": 0, "logEnabled": false}
 	}
 	limit := clamp(intValue(body["limit"], h.log.BufferCapacity()), 1, h.log.BufferCapacity())
 	pageNumber := intValue(body["page"], 0)
@@ -818,6 +827,7 @@ func (h *Handler) listLogs(body map[string]any) map[string]any {
 		"page":         page.Page,
 		"totalPages":   page.TotalPages,
 		"totalEntries": page.TotalEntries,
+		"logEnabled":   h.log.RecordingEnabled(),
 	}
 }
 
@@ -1105,6 +1115,10 @@ func (h *Handler) configSet(ctx context.Context, body map[string]any) map[string
 	if _, ok := cfgMap["logAccess"]; ok {
 		logAccess = validators.ToBool(cfgMap["logAccess"])
 	}
+	logEnabled := current.LogEnabled
+	if _, ok := cfgMap["logEnabled"]; ok {
+		logEnabled = validators.ToBool(cfgMap["logEnabled"])
+	}
 	imageProxyLimitEnabled := current.ImageProxyLimitEnabled
 	if _, ok := cfgMap["imageProxyLimitEnabled"]; ok {
 		imageProxyLimitEnabled = validators.ToBool(cfgMap["imageProxyLimitEnabled"])
@@ -1114,6 +1128,7 @@ func (h *Handler) configSet(ctx context.Context, body map[string]any) map[string
 		imageCacheEnabled = validators.ToBool(cfgMap["imageCacheEnabled"])
 	}
 	cfg := storage.SystemConfig{
+		LogEnabled:                  logEnabled,
 		LogLevel:                    logLevel,
 		LogAccess:                   logAccess,
 		CapyStripEmby:               normalizeBinaryFlag(cfgMap["capyStripEmby"], current.CapyStripEmby),
@@ -1138,6 +1153,7 @@ func (h *Handler) configSet(ctx context.Context, body map[string]any) map[string
 	if err := h.store.SaveSystemConfig(ctx, cfg); err != nil {
 		return fail(err.Error())
 	}
+	h.log.SetEnabled(cfg.LogEnabled)
 	h.log.Configure(cfg.LogLevel, cfg.LogAccess)
 	return ok()
 }
