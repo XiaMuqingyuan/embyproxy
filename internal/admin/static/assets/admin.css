@@ -35,6 +35,7 @@
         --log-tint: 30, 33, 29;
         --input-bg: #ffffff;
         --btn-hover-bg: #ffffff;
+        --row-hover: #fffaf0;
         --ink-1: var(--ink);
         --chart-c1: #315f8f;
         --chart-c2: #bd6a34;
@@ -709,14 +710,14 @@
         border-bottom: 0;
       }
       .route-row:hover {
-        background: #fffaf0;
+        background: var(--row-hover);
       }
       .route-row.selected {
         background: var(--pine-wash);
         box-shadow: inset 4px 0 0 var(--pine);
       }
       .route-row.focused:not(.selected) {
-        background: #fffaf0;
+        background: var(--row-hover);
         box-shadow: inset 4px 0 0 rgba(var(--pine-tint), 0.38);
       }
       .route-row.dragging {
@@ -2412,6 +2413,7 @@
         --log-tint: 30, 33, 29;
         --input-bg: #242b26;
         --btn-hover-bg: #2b342e;
+        --row-hover: #232a25;
         --chart-c1: #7d9fc6;
         --chart-c2: #d98d55;
         --chart-c3: #57a377;
